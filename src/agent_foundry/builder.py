@@ -41,6 +41,10 @@ For persistence use requires_db=true, network=database and declarative tables/or
 For reusable product comparisons, persist supplied specifications, source URLs, checked dates and
 comparison history, and provide bounded retrieval operations. Never substitute execution statistics
 for stored comparison data. Preserve unknown facts and source dates; do not infer fresh verification.
+DB tool outputs must include a top-level storage object with action (created, updated, reused or read)
+and a short record_type label. Report the actual completed operation, including on duplicate requests;
+declare this object in output_schema and examples. Never report stored historical write metadata as
+the current read outcome. Return write success only after the database transaction commits.
 The platform automatically creates a private schema and an isolated login. Never create or guess
 database/schema/role names, endpoints or passwords. psycopg is already provided by the platform.
 Read os.environ["FOUNDRY_TOOL_DATABASE_URL"] and connect with psycopg.connect(...).

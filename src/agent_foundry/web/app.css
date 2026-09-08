@@ -32,3 +32,5 @@
 .program-card-footer{flex-wrap:wrap;gap:9px}.program-use-metrics{display:inline-flex;align-items:center;gap:10px;margin-left:auto;color:#66758a}.program-use-metrics>span{white-space:nowrap;display:inline-flex;align-items:center;gap:3px}
 
 .program-card-top{flex-wrap:wrap;gap:10px}.program-identity{display:inline-flex;align-items:center;gap:9px;min-width:0}.creation-tokens{font-size:11px;line-height:1.5;color:#66758a}.program-identity>.icon-tile{flex-shrink:0}
+
+.storage-notice{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:8px;background:#eef7f4;font-size:13px}.storage-notice svg{width:18px;height:18px;flex-shrink:0}

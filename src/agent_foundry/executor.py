@@ -12,6 +12,7 @@ from .models import Manifest, validate_json
 from .primitives import builtin
 from .program_databases import ProgramDatabases
 from .security import PolicyError
+from .storage_notices import storage_notice
 
 
 def resolve_input(value, results):
@@ -120,6 +121,7 @@ class Executor:
                         "duration_ms": duration,
                         "success": success,
                         "error": error,
+                        "storage": storage_notice(manifest, program_id, result) if success else None,
                     },
                     request_id,
                 )

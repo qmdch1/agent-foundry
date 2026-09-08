@@ -31,7 +31,7 @@ const paths = {
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.grid}</svg>`;
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const names = {hrms:"HRMS 인사·연차 관리",calculator:"정확한 계산", "csv-statistics":"CSV 통계", "file-reader":"파일 읽기", "file-writer":"파일 쓰기", "database-query":"데이터베이스 조회", "http-api-caller":"HTTP API 연결", "web-search-adapter":"웹 검색", "python-executor":"Python 실행", "builder-internal":"프로그램 Builder"};
+const names = {"product-comparison":"상품 사양 비교", "record-store":"기록 저장",hrms:"HRMS 인사·연차 관리",calculator:"정확한 계산", "csv-statistics":"CSV 통계", "file-reader":"파일 읽기", "file-writer":"파일 쓰기", "database-query":"데이터베이스 조회", "http-api-caller":"HTTP API 연결", "web-search-adapter":"웹 검색", "python-executor":"Python 실행", "builder-internal":"프로그램 Builder"};
 const toolIcon = (p) => p.name === "calculator" ? "calculator" : p.name.includes("csv") ? "chart" : p.name.includes("file") ? "file" : p.name.includes("database") ? "database" : p.runtime === "python" ? "code" : p.name.includes("search") ? "search" : "link";
 const state = {session:{authenticated:false}, page:"prompt", overview:null, programs:[], settings:null, provider:"openai", providers:[], connectionAttempt:0, source:"installed", filter:"ACTIVE", query:"", offset:0, total:0, responses:[], busy:false, dirty:false, libraryRequest:0};
 const emptyResponse = '<div class="empty-result"><span class="empty-icon">'+icon("message")+'</span><strong>결과가 여기에 표시됩니다</strong><p>프로그램 실행 결과와 AI 답변을 함께 확인하세요.</p></div>';
@@ -150,6 +150,10 @@ function programDetail(id){
 }
 function fillPrompt(text){if($("#program-dialog").open)$("#program-dialog").close();showPage("prompt");$("#prompt-input").value=text;updatePromptCount();$("#prompt-input").focus();}
 function updatePromptCount(){$("#prompt-count").textContent=`${$("#prompt-input").value.length.toLocaleString()} / 12,000`;}
+function storageNoticesHTML(notices=[]){
+  const actions={created:"추가했습니다",updated:"수정했습니다",reused:"기존 데이터를 재사용했습니다",read:"조회했습니다"};
+  return notices.filter(n=>actions[n.action]).map(n=>`<p class="storage-notice">${icon("database")}<span><strong>${esc(names[n.program_name]||n.program_name)}</strong> · ${esc(n.record_type)} — ${actions[n.action]}</span></p>`).join("");
+}
 function resultHTML(result){
   if(result&&typeof result==="object"&&!Array.isArray(result)){
     const entries=Object.entries(result),labels={result:"계산 결과",count:"개수",missing_count:"결측값",sum:"합계",mean:"평균",min:"최솟값",max:"최댓값"};
@@ -170,7 +174,7 @@ async function submitPrompt(event){
   try{
     const response=await api("/v1/agent",{method:"POST",body:JSON.stringify({prompt,...requestOptions})});
     state.responses.push(response);const duration=((performance.now()-start)/1000).toFixed(2),direct=response.route==="deterministic",tool=response.programs.length>0;
-    item.innerHTML=`<div class="response-top"><div><span class="icon-tile small blue">${icon("spark")}</span><strong>Agent Foundry</strong><span class="route-badge ${direct?"direct":""}">${direct?"프로그램 바로 실행":tool?"프로그램 실행":response.route==="installation_pending"?"공유 프로그램 설치 중":response.route==="discovery_pending"?"공유 프로그램 확인 중":"AI 답변"}</span></div><button class="icon-button" data-copy="${id}" title="결과 복사" aria-label="결과 복사">${icon("copy")}</button></div><p class="request-text">${esc(prompt)}</p>${response.result!==null?resultHTML(response.result):""}${response.answer?`<div class="response-content">${esc(response.answer)}</div>`:""}<div class="response-status">${icon("check")}<span>${duration}초${direct&&!requestOptions.explain_result?" · LLM 호출 없이 처리":""}</span>${response.usage?.estimated_tokens_saved?`<span title="LLM 비교 기준으로 계산한 절감량">절약 ${Number(response.usage.estimated_tokens_saved).toLocaleString()} 토큰</span>`:""}${response.installation_job_id?'<span class="route-badge">별도 에이전트에서 설치 진행</span>':response.evaluation_job_id?'<span class="route-badge">공유 프로그램 확인·재사용 평가 요청됨</span>':""}</div>`;
+    item.innerHTML=`<div class="response-top"><div><span class="icon-tile small blue">${icon("spark")}</span><strong>Agent Foundry</strong><span class="route-badge ${direct?"direct":""}">${direct?"프로그램 바로 실행":tool?"프로그램 실행":response.route==="installation_pending"?"공유 프로그램 설치 중":response.route==="discovery_pending"?"공유 프로그램 확인 중":"AI 답변"}</span></div><button class="icon-button" data-copy="${id}" title="결과 복사" aria-label="결과 복사">${icon("copy")}</button></div><p class="request-text">${esc(prompt)}</p>${storageNoticesHTML(response.storage_notices)}${response.result!==null?resultHTML(response.result):""}${response.answer?`<div class="response-content">${esc(response.answer)}</div>`:""}<div class="response-status">${icon("check")}<span>${duration}초${direct&&!requestOptions.explain_result?" · LLM 호출 없이 처리":""}</span>${response.usage?.estimated_tokens_saved?`<span title="LLM 비교 기준으로 계산한 절감량">절약 ${Number(response.usage.estimated_tokens_saved).toLocaleString()} 토큰</span>`:""}${response.installation_job_id?'<span class="route-badge">별도 에이전트에서 설치 진행</span>':response.evaluation_job_id?'<span class="route-badge">공유 프로그램 확인·재사용 평가 요청됨</span>':""}</div>`;
     if(response.installation_job_id)watchJob(response.installation_job_id);
     $("#result-count").textContent=`${state.responses.length}개 응답`;refresh();
   }catch(e){state.responses.push({error:e.message});item.innerHTML=`<div class="response-top"><strong>요청을 완료하지 못했습니다</strong></div><p class="request-text">${esc(prompt)}</p><p class="response-error">${esc(e.message)}</p><button class="text-button" data-example="${esc(prompt)}">입력 다시 확인하기${icon("arrow")}</button>`;$("#result-count").textContent="입력과 연결 상태를 확인해주세요";}

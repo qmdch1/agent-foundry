@@ -112,6 +112,13 @@ class AgentService:
                 {"success": True, "route": route, "duration_ms": (time.monotonic() - started) * 1000},
                 request_id,
             )
+            storage_events = await self.db.fetch(
+                "SELECT data->'storage' AS notice FROM agent.events "
+                "WHERE request_id=%s AND event_type='tool_execution' "
+                "AND data->>'success'='true' AND data->'storage' IS NOT NULL "
+                "ORDER BY created_at",
+                (request_id,),
+            ) if plan.programs else []
             return {
                 "request_id": str(request_id),
                 "route": route,
@@ -121,6 +128,7 @@ class AgentService:
                 "evaluation_job_id": str(job_id) if job_id else None,
                 "installation_job_id": str(installation_job) if installation_job else None,
                 "usage": usage,
+                "storage_notices": [row["notice"] for row in storage_events if row["notice"]],
             }
         except Exception as exc:
             await self.db.event(
