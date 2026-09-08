@@ -33,7 +33,7 @@ const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const names = {calculator:"정확한 계산", "csv-statistics":"CSV 통계", "file-reader":"파일 읽기", "file-writer":"파일 쓰기", "database-query":"데이터베이스 조회", "http-api-caller":"HTTP API 연결", "web-search-adapter":"웹 검색", "python-executor":"Python 실행", "builder-internal":"프로그램 Builder"};
 const toolIcon = (p) => p.name === "calculator" ? "calculator" : p.name.includes("csv") ? "chart" : p.name.includes("file") ? "file" : p.name.includes("database") ? "database" : p.runtime === "python" ? "code" : p.name.includes("search") ? "search" : "link";
-const state = {session:{authenticated:false}, page:"prompt", overview:null, programs:[], settings:null, provider:"openai", source:"installed", filter:"all", query:"", offset:0, total:0, responses:[], busy:false, dirty:false, libraryRequest:0};
+const state = {session:{authenticated:false}, page:"prompt", overview:null, programs:[], settings:null, provider:"openai", providers:[], connectionAttempt:0, source:"installed", filter:"all", query:"", offset:0, total:0, responses:[], busy:false, dirty:false, libraryRequest:0};
 const emptyResponse = '<div class="empty-result"><span class="empty-icon">'+icon("message")+'</span><strong>결과가 여기에 표시됩니다</strong><p>프로그램 실행 결과와 AI 답변을 함께 확인하세요.</p></div>';
 function hydrateIcons(root=document){ root.querySelectorAll("[data-icon]").forEach(el => {el.innerHTML=icon(el.dataset.icon);}); }
 function toast(message, error=false){ const el=document.createElement("div");el.className="toast"+(error?" error":"");el.textContent=message;$("#toast-region").append(el);setTimeout(()=>el.remove(),5000); }
@@ -83,7 +83,7 @@ function updateOverview(){
   $("#summary-total").textContent=o.programs.total;$("#summary-active").textContent=o.programs.active;$("#summary-disabled").textContent=o.programs.disabled;
   $("#program-total").textContent=`${o.programs.total}개 등록됨`;
   $("#current-model").textContent=o.connection.main_model || "설정 필요";
-  const provider=o.connection.provider==="openai"?"OpenAI":"호환 API";
+  const provider=o.connection.provider_name||"AI";
   $("#connection-pill span").textContent=o.connection.main_model?`${provider} · 모델 설정됨`:`${provider} 연결 설정 필요`;
   $("#connection-pill").classList.toggle("connected",!!o.connection.main_model);
   $("#setup-banner").hidden=!!o.connection.main_model;
@@ -163,7 +163,25 @@ async function submitPrompt(event){
   }catch(e){state.responses.push({error:e.message});item.innerHTML=`<div class="response-top"><strong>요청을 완료하지 못했습니다</strong></div><p class="request-text">${esc(prompt)}</p><p class="response-error">${esc(e.message)}</p><button class="text-button" data-example="${esc(prompt)}">입력 다시 확인하기${icon("arrow")}</button>`;$("#result-count").textContent="입력과 연결 상태를 확인해주세요";}
   finally{state.busy=false;$("#send-button").disabled=false;$("#new-chat").disabled=false;$("#send-button").innerHTML='요청 보내기'+icon("arrow");}
 }
-function setProvider(value, changeUrl=false){state.provider=value;$$("[data-provider]").forEach(b=>{b.classList.toggle("chosen",b.dataset.provider===value);b.setAttribute("aria-pressed",String(b.dataset.provider===value));});if(changeUrl){$("#base-url").value=value==="openai"?"https://api.openai.com/v1":(state.settings?.provider==="compatible"?state.settings.base_url:"");$("#base-url").placeholder="https://your-provider.example/v1";}$("#api-key-link").hidden=value!=="openai";}
+function setProvider(value, changeUrl=false){
+  const changed=state.provider!==value;state.provider=value;
+  const provider=state.providers.find(p=>p.id===value);
+  if(!$("#provider-options [data-provider]"))$("#provider-options").innerHTML=state.providers.map(p=>`<button type="button" class="provider-option ${p.id===value?"chosen":""}" data-provider="${esc(p.id)}" aria-pressed="${p.id===value}"><span class="provider-logo">${esc(p.name.slice(0,1))}</span><span><strong>${esc(p.name)}</strong><small>${esc(p.description)}</small></span><span class="radio-mark"></span></button>`).join("");
+  $$("[data-provider]").forEach(b=>{b.classList.toggle("chosen",b.dataset.provider===value);b.setAttribute("aria-pressed",String(b.dataset.provider===value));});
+  if(changeUrl&&changed){
+    const saved=state.settings?.provider===value;
+    $("#base-url").value=saved?state.settings.base_url:provider?.base_url||"";
+    $("#provider-key").value="";$("#clear-key").checked=false;$("#model-options").innerHTML="";
+    ["main","router","evaluator","builder"].forEach(r=>$("#"+r+"-model").value=saved?state.settings[r+"_model"]||"":"");
+    $("#provider-key").placeholder=saved&&state.settings.has_api_key?"저장된 키를 사용합니다. 변경할 때만 입력하세요.":"선택한 제공자의 API 키 입력";
+    $("#key-state").textContent=saved&&state.settings.has_api_key?"키 등록됨":"새 연결 설정 중";
+    $("#key-state").classList.toggle("saved",!!(saved&&state.settings.has_api_key));
+  }
+  $("#base-url").placeholder=provider?.base_url||"https://your-provider.example/v1";
+  const link=$("#api-key-link");link.hidden=!provider?.key_url;
+  if(provider?.key_url){link.href=provider.key_url;link.innerHTML=esc(provider.name)+" 키 발급 안내 "+icon("external");}
+  $("#provider-note").textContent=value==="compatible"?"OpenAI 호환 API의 주소와 키를 입력하세요. 사설 모델 서버도 연결할 수 있습니다.":`${provider?.name||"선택한 제공자"}의 API 키를 사용합니다. 웹 서비스 로그인이나 구독과는 별도로 연결합니다.`;
+}
 function applySettings(profile){
   state.settings=profile;setProvider(profile.provider);$("#base-url").value=profile.base_url;$("#provider-key").value="";$("#provider-key").type="password";$("#clear-key").checked=false;$("#clear-key-label").hidden=!profile.has_api_key;
   $("#show-key").setAttribute("aria-label","입력 중인 API 키 표시");
@@ -172,14 +190,14 @@ function applySettings(profile){
   ["main","router","evaluator","builder"].forEach(r=>$("#"+r+"-model").value=profile[r+"_model"]||"");
   state.dirty=false;$("#unsaved-pill").hidden=true;$("#settings-form .form-error")?.remove();
 }
-async function loadSettings(){try{applySettings(await api("/ui/settings"));}catch(e){toast(e.message,true);}}
+async function loadSettings(){try{const [options,profile]=await Promise.all([api("/ui/providers"),api("/ui/settings")]);state.providers=options.items;applySettings(profile);}catch(e){toast(e.message,true);}}
 function readSettings(){return {provider:state.provider,base_url:$("#base-url").value.trim(),api_key:$("#provider-key").value||null,clear_api_key:$("#clear-key").checked,...Object.fromEntries(["main","router","evaluator","builder"].map(r=>[r+"_model",$("#"+r+"-model").value.trim()]))};}
-function markDirty(){state.dirty=true;$("#unsaved-pill").hidden=false;$("#test-result").textContent="";}
+function markDirty(){state.connectionAttempt++;state.dirty=true;$("#unsaved-pill").hidden=false;$("#test-result").textContent="";}
 async function testConnection(){
-  const button=$("#test-connection"),result=$("#test-result");if(!$("#base-url").reportValidity())return;
+  const attempt=++state.connectionAttempt,button=$("#test-connection"),result=$("#test-result");if(!$("#base-url").reportValidity())return;
   button.disabled=true;button.innerHTML='<span class="spinner"></span>연결 확인 중';result.textContent="";result.classList.remove("error");
-  try{const data=await api("/ui/connection/test",{method:"POST",body:JSON.stringify(readSettings())});$("#model-options").innerHTML=data.models.map(m=>`<option value="${esc(m)}"></option>`).join("");result.textContent=`연결 확인됨 · ${data.models.length}개 모델 조회`;toast("모델 목록을 가져왔습니다. 작업별 모델을 선택해주세요.");}
-  catch(e){result.textContent=e.message;result.classList.add("error");}
+  try{const data=await api("/ui/connection/test",{method:"POST",body:JSON.stringify(readSettings())});if(attempt!==state.connectionAttempt)return;$("#model-options").innerHTML=data.models.map(m=>`<option value="${esc(m)}"></option>`).join("");result.textContent=`모델 목록 확인됨 · ${data.models.length}개 모델`;toast("모델 목록을 가져왔습니다. 작업별 모델을 선택해주세요.");}
+  catch(e){if(attempt===state.connectionAttempt){result.textContent=e.message;result.classList.add("error");}}
   finally{button.disabled=false;button.innerHTML=icon("link")+"연결 확인 및 모델 가져오기";}
 }
 async function saveSettings(event){

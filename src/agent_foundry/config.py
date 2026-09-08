@@ -3,6 +3,8 @@ from pathlib import Path
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .providers import ProviderId
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="FOUNDRY_", env_file=".env", extra="ignore")
@@ -14,6 +16,7 @@ class Settings(BaseSettings):
     prompt_hash_key: SecretStr = SecretStr("")
     llm_api_key: SecretStr = SecretStr("")
     llm_base_url: str = "https://api.openai.com/v1"
+    llm_provider: ProviderId | None = None
     llm_private_hosts: list[str] = []
     web_session_hours: int = Field(8, ge=1, le=24)
     local_admin: bool = False

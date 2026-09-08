@@ -1,7 +1,7 @@
 # Agent Foundry
 
 사용자 자연어 요청에서 필요한 프로그램만 검색하고, 재사용 가능한 Python 기능을 별도 Worker에서
-생성·검증·배포하는 실행 가능한 MVP입니다. OpenAI 호환 Chat Completions API를 사용하며
+생성·검증·배포하는 실행 가능한 MVP입니다. OpenAI 외 여러 AI 제공자를 선택해 연결할 수 있으며
 제공자 주소와 Main / Router / Evaluator / Builder 모델은 웹 설정 또는 환경설정으로 지정합니다.
 
 메인 저장소는 [agent-foundry](https://github.com/qmdch1/agent-foundry), 생성 프로그램 저장소는
@@ -82,10 +82,44 @@ LLM이 설정되지 않아도 계산기와 이미 등록된 명확한 프로그�
   ‘이 서버 프로그램’과 ‘GitHub 공유 프로그램’을 구분합니다. 설치일, 호출 횟수, 추정 절약 토큰,
   버전, 입력 형식, 요청 예시를 확인하고 공유 프로그램의 설치를 요청할 수 있습니다.
   목록은 50개씩 조회하며 관리자는 별도 에이전트의 작업 상태도 확인합니다.
-- **연결 및 모델 설정**: OpenAI 또는 호환 API의 기본 주소와 키를 입력하고 실제 모델 목록을
+- **연결 및 모델 설정**: OpenAI, Claude, Gemini, DeepSeek, Groq, Mistral, OpenRouter 또는 직접 연결을 선택합니다.
+  제공자 기본 주소가 자동 입력되고 키 발급 안내가 바뀝니다. API 키로 실제 모델 목록을
   조회합니다. Main / Router / Evaluator / Builder 모델을 별도로 지정할 수 있습니다.
   `/models` 조회를 지원하지 않는 제공자는 모델 이름을 직접 입력합니다. 연결 확인은 모델 목록
-  조회이며, 모든 모델의 추론 권한이나 Chat Completions 지원까지 보장하는 검사는 아닙니다.
+  조회이며, 모든 모델의 추론 권한이나 JSON 출력 지원까지 보장하는 검사는 아닙니다.
+
+### AI 제공자 연결
+
+현재 하나의 활성 제공자 연결을 저장하고 Main·Router·Evaluator·Builder가 함께 사용합니다.
+제공자 변경 → API 키 입력 → 연결 확인 및 모델 가져오기 → 역할별 모델 선택 → 설정 저장 순서입니다.
+모델을 바꿀 때 제공자가 반환한 모델 ID를 사용하며 모델명이나 유료 모델을 임의로 고정하지 않습니다.
+제공자를 바꾸면 입력 중인 키·모델 목록을 초기화합니다. 이전 키는 서버에서 새 제공자나 다른
+API 주소로 재사용하지 않습니다. 기존 연결은 새 설정을 저장하기 전까지 계속 적용됩니다.
+
+| 제공자 | 기본 API 주소 | 구현 기준 |
+| --- | --- | --- |
+| OpenAI | `https://api.openai.com/v1` | 기존 Chat Completions 연결 |
+| Anthropic Claude | `https://api.anthropic.com/v1` | [Messages API](https://platform.claude.com/docs/en/api/messages/create) · 전용 인증 헤더 |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta` | [generateContent API](https://ai.google.dev/api/generate-content) · 전용 인증 헤더 |
+| DeepSeek | `https://api.deepseek.com` | [OpenAI 호환 연결](https://api-docs.deepseek.com/) |
+| Groq | `https://api.groq.com/openai/v1` | [OpenAI 호환 연결](https://console.groq.com/docs/openai) |
+| Mistral AI | `https://api.mistral.ai/v1` | [Chat API](https://docs.mistral.ai/api/endpoint/chat) |
+| OpenRouter | `https://openrouter.ai/api/v1` | [Chat API](https://openrouter.ai/docs/api/reference/overview) |
+| 직접 연결 | 사용자가 입력 | OpenAI 호환 Chat Completions + `/models` |
+
+제공자 정의는 `providers.py` 한 곳에서 관리하고 UI에 전달합니다. SDK 추가 없이 기존 HTTP 계층을
+사용합니다. Claude와 Gemini의 페이지 단위 모델 목록을 제한된 범위에서 조회하며, Gemini의
+generateContent 미지원 모델과 Mistral의 대화 미지원 모델은 제외합니다. 다른 제공자는 목록에서
+대화·JSON 출력이 가능한 모델을 선택해야 합니다. 모델 조회 시에는 유료 답변 생성 호출을 하지 않습니다.
+
+JSON이 필요한 작업은 Claude에 JSON 객체 출력을 지시하고 서버에서 파싱·검증합니다. Gemini는
+JSON 응답 형식을, 호환 API는 JSON object 형식을 요청합니다. 불완전한 응답·거부·잘못된 JSON을
+성공으로 처리하지 않습니다. 토큰 통계는 제공자별 입력·출력·캐시/추론 사용량 형식을 정규화하고
+제공자·모델·역할과 함께 기록합니다. 요금이나 모델별 성능은 추정하지 않습니다.
+
+환경변수만 사용하는 경우 `FOUNDRY_LLM_PROVIDER`와 `FOUNDRY_LLM_BASE_URL`을 함께 지정합니다.
+제공자를 생략하면 알려진 기본 주소에서 추론하며, 저장된 웹 설정이 환경변수보다 우선합니다.
+실제 제공자별 추론·계정 권한은 해당 계정의 API 키와 모델을 연결한 환경에서 확인합니다.
 
 로컬에서 로그인 없이 모든 관리자 기능을 쓰려면 `.env`에 `FOUNDRY_LOCAL_ADMIN=true`를 설정하고
 API를 다시 시작합니다. `localhost`, `127.0.0.1`, `::1` 주소에서는 웹·API에 접속 키가 필요 없으며

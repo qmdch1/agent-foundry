@@ -8,11 +8,12 @@ import httpx
 from pydantic import Field, SecretStr, field_validator
 
 from .models import StrictModel
+from .providers import PROVIDERS, ProviderId, auth_headers, infer_provider
 from .security import PolicyError, decrypt_payload, encrypt_payload
 
 
 class ConnectionProfile(StrictModel):
-    provider: str = Field("openai", pattern=r"^(openai|compatible)$")
+    provider: ProviderId = "openai"
     base_url: str = Field("https://api.openai.com/v1", max_length=2000)
     api_key: SecretStr = SecretStr("")
     main_model: str = Field("", max_length=150)
@@ -48,7 +49,7 @@ class ConnectionProfile(StrictModel):
 
 
 class ProfileUpdate(ConnectionProfile):
-    provider: str = Field(pattern=r"^(openai|compatible)$")
+    provider: ProviderId
     base_url: str = Field(max_length=2000)
     api_key: SecretStr | None = None
     clear_api_key: bool = False
@@ -64,9 +65,7 @@ class ProfileStore:
         return ConnectionProfile(
             base_url=self.settings.llm_base_url,
             api_key=self.settings.llm_api_key,
-            provider="openai"
-            if urlsplit(self.settings.llm_base_url).hostname == "api.openai.com"
-            else "compatible",
+            provider=self.settings.llm_provider or infer_provider(self.settings.llm_base_url),
             **{
                 role + "_model": getattr(self.settings, role + "_model")
                 for role in ("main", "router", "evaluator", "builder")
@@ -87,6 +86,7 @@ class ProfileStore:
         profile = await self.current()
         return {
             **profile.model_dump(exclude={"api_key"}),
+            "provider_name": PROVIDERS[profile.provider].name,
             "has_api_key": bool(profile.api_key.get_secret_value()),
             "models_configured": all(
                 getattr(profile, r + "_model") for r in ("main", "router", "evaluator", "builder")
@@ -101,8 +101,8 @@ class ProfileStore:
         elif update.api_key and update.api_key.get_secret_value():
             key = update.api_key
         elif (
-            urlsplit(update.base_url).netloc != urlsplit(previous.base_url).netloc and key.get_secret_value()
-        ):
+            update.provider != previous.provider or update.base_url != previous.base_url
+        ) and key.get_secret_value():
             raise PolicyError("제공자 주소를 바꿀 때는 새 API 키를 입력하거나 기존 키 삭제를 선택해주세요.")
         return ConnectionProfile(**update.model_dump(exclude={"api_key", "clear_api_key"}), api_key=key)
 
@@ -152,36 +152,76 @@ class ProfileStore:
 
     async def models(self, update=None, client=None):
         profile = await self.merge(update) if update else await self.current()
+        if profile.provider != "compatible" and not profile.api_key.get_secret_value():
+            raise PolicyError("선택한 제공자의 API 키를 입력해주세요.")
         await self.check_destination(profile)
-        headers = {}
-        if profile.api_key.get_secret_value():
-            headers["Authorization"] = "Bearer " + profile.api_key.get_secret_value()
+        headers = auth_headers(profile)
+        protocol = PROVIDERS[profile.provider].protocol
         own_client = client is None
         client = client or httpx.AsyncClient(timeout=15, trust_env=False, follow_redirects=False)
+        models, cursor, total_bytes = set(), None, 0
         try:
-            async with client.stream("GET", profile.base_url + "/models", headers=headers) as response:
-                if response.status_code in (401, 403):
-                    raise PolicyError("API 키 또는 모델 조회 권한을 확인해주세요.")
-                if response.status_code == 429:
-                    raise PolicyError("제공자의 요청 한도에 도달했습니다. 잠시 후 다시 시도해주세요.")
-                if response.status_code != 200:
-                    raise PolicyError(
-                        "모델 목록을 가져오지 못했습니다. API 주소와 /models 지원 여부를 확인해주세요."
-                    )
-                raw = bytearray()
-                async for chunk in response.aiter_bytes():
-                    raw.extend(chunk)
-                    if len(raw) > 2_000_000:
-                        raise PolicyError("제공자의 모델 목록이 허용된 크기를 초과했습니다.")
-            result = json.loads(raw)
-            models = sorted(
-                {
-                    m["id"]
-                    for m in result["data"]
-                    if isinstance(m, dict) and isinstance(m.get("id"), str) and len(m["id"]) <= 150
-                }
-            )[:1000]
-            return {"connected": True, "models": models, "provider": profile.provider}
+            for _ in range(10):
+                params = {}
+                if protocol == "anthropic":
+                    params = {"limit": 1000, **({"after_id": cursor} if cursor else {})}
+                elif protocol == "gemini":
+                    params = {"pageSize": 1000, **({"pageToken": cursor} if cursor else {})}
+                async with client.stream(
+                    "GET",
+                    profile.base_url + "/models",
+                    headers=headers,
+                    params=params,
+                    follow_redirects=False,
+                ) as response:
+                    if response.status_code in (401, 403):
+                        raise PolicyError("API 키 또는 모델 조회 권한을 확인해주세요.")
+                    if response.status_code == 429:
+                        raise PolicyError("제공자의 요청 한도에 도달했습니다. 잠시 후 다시 시도해주세요.")
+                    if response.status_code != 200:
+                        raise PolicyError(
+                            "모델 목록을 가져오지 못했습니다. API 주소와 /models 지원 여부를 확인해주세요."
+                        )
+                    raw = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        raw.extend(chunk)
+                        total_bytes += len(chunk)
+                        if total_bytes > 2_000_000:
+                            raise PolicyError("제공자의 모델 목록이 허용된 크기를 초과했습니다.")
+                result = json.loads(raw)
+                if not isinstance(result, dict):
+                    raise ValueError("Expected a model-list object")
+                entries = result.get("models", []) if protocol == "gemini" else result["data"]
+                if not isinstance(entries, list):
+                    raise ValueError("Expected a list of models")
+                for item in entries:
+                    if not isinstance(item, dict):
+                        continue
+                    if protocol == "gemini" and "generateContent" not in item.get(
+                        "supportedGenerationMethods", []
+                    ):
+                        continue
+                    capabilities = item.get("capabilities") or {}
+                    if (
+                        protocol == "chat"
+                        and isinstance(capabilities, dict)
+                        and capabilities.get("completion_chat") is False
+                    ):
+                        continue
+                    model = item.get("name") if protocol == "gemini" else item.get("id")
+                    if isinstance(model, str) and len(model) <= 150:
+                        models.add(model.removeprefix("models/") if protocol == "gemini" else model)
+                next_cursor = (
+                    result.get("nextPageToken")
+                    if protocol == "gemini"
+                    else result.get("last_id")
+                    if result.get("has_more")
+                    else None
+                )
+                if not next_cursor or next_cursor == cursor or len(models) >= 1000:
+                    break
+                cursor = next_cursor
+            return {"connected": True, "models": sorted(models)[:1000], "provider": profile.provider}
         except PolicyError:
             raise
         except httpx.HTTPError:

@@ -8,6 +8,7 @@ from pydantic import Field, SecretStr
 
 from .models import StrictModel
 from .profiles import ProfileUpdate
+from .providers import provider_options
 from .security import PolicyError
 
 
@@ -86,7 +87,8 @@ def console_router(services):
         return {
             "programs": counts[0],
             "connection": {
-                k: profile[k] for k in ("provider", "has_api_key", "models_configured", "main_model")
+                k: profile[k]
+                for k in ("provider", "provider_name", "has_api_key", "models_configured", "main_model")
             },
             "role": session["role"],
         }
@@ -184,6 +186,10 @@ def console_router(services):
     @router.get("/ui/settings", dependencies=[Depends(administrator)])
     async def settings():
         return await profiles.public()
+
+    @router.get("/ui/providers", dependencies=[Depends(administrator)])
+    async def providers():
+        return {"items": provider_options()}
 
     @router.put("/ui/settings", dependencies=[Depends(administrator)])
     async def save(data: ProfileUpdate):

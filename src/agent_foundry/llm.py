@@ -3,6 +3,8 @@ import time
 
 import httpx
 
+from .profiles import ProfileStore
+from .providers import auth_headers, completion_request, response_text, response_usage
 from .security import PolicyError
 
 
@@ -16,36 +18,30 @@ class LLM:
         await self.client.aclose()
 
     async def call(self, role, system, user, *, structured=False, request_id=None):
-        profile = await self.profiles.current() if self.profiles else None
-        model = getattr(profile or self.settings, f"{role}_model")
-        api_key = profile.api_key if profile else self.settings.llm_api_key
-        base_url = profile.base_url if profile else self.settings.llm_base_url
+        profile = (
+            await self.profiles.current()
+            if self.profiles
+            else ProfileStore(self.db, self.settings).defaults()
+        )
+        model = getattr(profile, f"{role}_model")
         if not model:
             raise PolicyError(f"Configure FOUNDRY_{role.upper()}_MODEL")
         started = time.monotonic()
-        payload = {
-            "model": model,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            "max_completion_tokens": getattr(self.settings, f"{role}_max_tokens"),
-        }
-        if structured:
-            payload["response_format"] = {"type": "json_object"}
         success, usage = False, {}
         try:
-            headers = {}
-            if api_key.get_secret_value():
-                headers["Authorization"] = f"Bearer {api_key.get_secret_value()}"
+            path, payload = completion_request(
+                profile, model, system, user, getattr(self.settings, f"{role}_max_tokens"), structured
+            )
             response = await self.client.post(
-                base_url.rstrip("/") + "/chat/completions", json=payload, headers=headers
+                profile.base_url + path, json=payload, headers=auth_headers(profile), follow_redirects=False
             )
             response.raise_for_status()
             data = response.json()
-            usage = data.get("usage", {})
-            choice = data["choices"][0]
-            if choice.get("finish_reason") != "stop" or choice["message"].get("refusal"):
-                raise PolicyError("LLM response was incomplete or refused")
-            content = choice["message"]["content"]
+            usage = response_usage(profile.provider, data)
+            content = response_text(profile.provider, data)
             result = json.loads(content) if structured else content
+            if structured and not isinstance(result, dict):
+                raise PolicyError("LLM must return a JSON object")
             success = True
             return result
         finally:
@@ -53,6 +49,7 @@ class LLM:
                 "llm",
                 {
                     "role": role,
+                    "provider": profile.provider,
                     "model": model,
                     "success": success,
                     "duration_ms": (time.monotonic() - started) * 1000,
