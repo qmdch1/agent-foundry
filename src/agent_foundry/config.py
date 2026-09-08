@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     prompt_hash_key: SecretStr = SecretStr("")
     llm_api_key: SecretStr = SecretStr("")
     llm_base_url: str = "https://api.openai.com/v1"
+    llm_private_hosts: list[str] = []
+    web_session_hours: int = Field(8, ge=1, le=24)
     main_model: str = ""
     router_model: str = ""
     evaluator_model: str = ""

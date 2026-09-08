@@ -2,7 +2,7 @@
 
 사용자 자연어 요청에서 필요한 프로그램만 검색하고, 재사용 가능한 Python 기능을 별도 Worker에서
 생성·검증·배포하는 실행 가능한 MVP입니다. OpenAI 호환 Chat Completions API를 사용하며
-제공자 주소와 Main / Router / Evaluator / Builder 모델은 환경설정으로 지정합니다.
+제공자 주소와 Main / Router / Evaluator / Builder 모델은 웹 설정 또는 환경설정으로 지정합니다.
 
 메인 저장소는 [agent-foundry](https://github.com/qmdch1/agent-foundry), 생성 프로그램 저장소는
 [agent-tools](https://github.com/qmdch1/agent-tools)입니다. 로컬 폴더도 서로 분리합니다.
@@ -61,13 +61,56 @@ docker compose --profile images build sandbox-image
 uv run uvicorn agent_foundry.api:app --host 127.0.0.1 --port 8000
 ```
 
-다른 터미널에서 `uv run foundry worker`를 실행합니다. `.env`에 API 제공자 주소, API key,
-역할별 모델을 지정해야 일반 LLM 답변과 자동 생성이 작동합니다. 키·비밀번호를 터미널 출력,
+다른 터미널에서 `uv run foundry worker`를 실행합니다. 웹의 연결 및 모델 설정 또는 `.env`에
+API 제공자 주소, API key, 역할별 모델을 지정해야 일반 LLM 답변과 자동 생성이 작동합니다. 키·비밀번호를 터미널 출력,
 Git 또는 Registry에 복사하지 않습니다. 모델 이름을 임의의 제품으로 고정하지 않았습니다.
 LLM이 설정되지 않아도 계산기와 이미 등록된 명확한 프로그램 요청은 실행할 수 있습니다.
 
 `init-env`는 기존 `.env`를 덮어쓰지 않고 별도 사용자/관리자 키, DB 비밀번호, Job 암호화 키,
 프롬프트 HMAC 키를 무작위로 만듭니다. `.env`는 Git에서 제외됩니다.
+
+## 웹 워크스페이스
+
+서버 실행 후 [http://localhost:8000](http://localhost:8000/)에서 웹 화면을 사용합니다.
+별도 프런트엔드 서버나 Node.js 설치는 필요하지 않습니다.
+
+- **프롬프트**: 요청 입력, 프로그램 예시, 실행 결과, AI 답변, 실행 경로와 소요 시간을 확인합니다.
+  `Ctrl+Enter`로 요청을 보낼 수 있습니다. 프로그램 자동 생성과 결과 설명 여부를 각각 선택합니다.
+  화면에 이전 응답을 유지하지만, 현재 각 요청은 독립적으로 처리됩니다. 대화 문맥을 다음 요청에
+  자동 전달하지 않으며, 새로고침하면 화면의 응답은 사라집니다.
+- **프로그램**: 실제 Registry의 프로그램을 검색하고 사용 가능·설정 대기·내부 기능으로 구분합니다.
+  상세 화면에서 버전, 사용 횟수, 입력 형식, 요청 예시를 확인합니다. 목록은 50개씩 조회합니다.
+- **연결 및 모델 설정**: OpenAI 또는 호환 API의 기본 주소와 키를 입력하고 실제 모델 목록을
+  조회합니다. Main / Router / Evaluator / Builder 모델을 별도로 지정할 수 있습니다.
+  `/models` 조회를 지원하지 않는 제공자는 모델 이름을 직접 입력합니다. 연결 확인은 모델 목록
+  조회이며, 모든 모델의 추론 권한이나 Chat Completions 지원까지 보장하는 검사는 아닙니다.
+
+최초 접속에는 `.env`의 `FOUNDRY_ADMIN_KEY`를 워크스페이스 접속 키로 사용합니다.
+`FOUNDRY_API_KEY`로 접속한 일반 사용자는 공개 프로그램과 프롬프트만 사용합니다.
+관리자가 로컬 터미널에서 다음 명령을 실행하면 키를 브라우저에 입력하지 않고 시작할 수 있는
+**5분 유효·1회 사용 관리자 연결 링크**를 받습니다. 이 링크를 공유하거나 로그에 보관하지 않습니다.
+
+```bash
+# 로컬 Python 실행
+uv run foundry web-login
+# Docker Compose 실행
+docker compose exec -T builder foundry web-login
+```
+
+다른 주소로 접속한다면 `--url https://your-agent.example`을 지정합니다. 로그인 후 URL에서
+일회용 토큰을 제거하며 서버에는 토큰 해시만 저장합니다. 세션은 기본 8시간이고 로그아웃하면
+즉시 폐기합니다. HttpOnly / SameSite 쿠키와 동일 출처·CSRF 검사를 적용합니다.
+
+**OpenAI 연결은 API 키 인증입니다. ChatGPT 로그인이나 구독을 연결하는 기능이 아닙니다.**
+API 키는 브라우저 저장소에 보관하지 않으며, 저장 후 읽어오는 API에도 반환하지 않습니다.
+주소와 역할별 모델을 포함한 전체 설정은 PostgreSQL에 암호화해 저장하고 API와 Worker가 다음
+LLM 호출부터 함께 적용합니다. 웹 저장값이 `.env`의 초기값보다 우선합니다.
+암호화에 쓰는 `FOUNDRY_JOB_ENCRYPTION_KEY`는 DB와 분리해 보관하고 서버 이전 시 함께 복구합니다.
+기존 설치는 새 버전을 올린 뒤 `foundry migrate`로 웹 설정·세션 테이블을 추가해야 합니다.
+
+사설/로컬 제공자는 서버에서 `FOUNDRY_LLM_PRIVATE_HOSTS='["llm.internal"]'`처럼 호스트를
+명시적으로 허용합니다. 기본값은 공개 HTTPS API만 허용합니다. 외부 공개 시 신뢰된 리버스
+프록시에서 TLS와 접근 제한을 적용하고 전달된 호스트·프로토콜이 실제 웹 주소와 일치하게 설정합니다.
 
 ## Docker Compose로 전체 실행
 

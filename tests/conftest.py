@@ -41,7 +41,16 @@ async def container(settings):
     app = Container(settings)
     await app.open()
     await app.db.migrate()
-    for table in ("programs", "releases", "jobs", "events", "tool_migrations"):
+    for table in (
+        "programs",
+        "releases",
+        "jobs",
+        "events",
+        "tool_migrations",
+        "console_settings",
+        "web_sessions",
+        "web_launches",
+    ):
         await app.db.execute(f"DELETE FROM agent.{table}")
     await seed(app.registry)
     yield app

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Agent Foundry에서 프롬프트를 실행하고, 연결된 프로그램과 AI 모델을 관리하세요.">
+  <title>Agent Foundry · Workspace</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">본문으로 이동</a>
+  <aside class="sidebar" aria-label="주 메뉴">
+    <a class="brand" href="/" aria-label="Agent Foundry 홈"><span class="brand-mark">f<span>·</span></span><span>agent<span class="brand-light">foundry</span></span></a>
+    <div class="workspace-label">내 워크스페이스 <span class="tiny-dot"></span></div>
+    <nav>
+      <button class="nav-item selected" data-page="prompt" aria-current="page"><span data-icon="message"></span>프롬프트<span class="nav-end" data-icon="arrow"></span></button>
+      <button class="nav-item" data-page="programs"><span data-icon="grid"></span>프로그램<span class="nav-count" id="nav-program-count">–</span></button>
+      <button class="nav-item" data-page="settings"><span data-icon="settings"></span>연결 및 모델 설정</button>
+    </nav>
+    <div class="sidebar-note"><span data-icon="layers"></span><strong>한 번 만든 기능을,<br>다음 요청에도.</strong><p>필요한 프로그램을 찾아<br>자동으로 재사용합니다.</p></div>
+    <div class="sidebar-bottom">
+      <div class="workspace-state"><span class="status-dot" id="sidebar-status-dot"></span><span id="sidebar-status">연결 전</span><span class="version">v0.1</span></div>
+      <button class="account-button" id="account-button"><span class="avatar" data-icon="user"></span><span><strong id="account-title">워크스페이스 연결</strong><small id="account-subtitle">접속 키로 시작하기</small></span><span data-icon="chevron"></span></button>
+    </div>
+  </aside>
+
+  <div class="app-body">
+    <header class="topbar"><div class="breadcrumb"><span>워크스페이스</span><span>/</span><strong id="page-label">프롬프트</strong></div><div class="topbar-actions"><span class="connection-pill" id="connection-pill"><i></i><span>연결 전</span></span><button class="icon-button" id="refresh-button" aria-label="상태 새로고침" title="상태 새로고침"><span data-icon="refresh"></span></button><button class="icon-button mobile-account" id="mobile-account" aria-label="워크스페이스 연결" title="워크스페이스 연결"><span data-icon="user"></span></button></div></header>
+    <main id="main" tabindex="-1">
+      <section class="page" id="page-prompt" aria-labelledby="prompt-title">
+        <div class="page-heading"><div><div class="eyebrow">PROMPT WORKSPACE</div><h1 id="prompt-title">무엇을 도와드릴까요?</h1><p>요청을 입력하면 필요한 프로그램을 찾아 처리합니다.</p></div><button class="button secondary" id="new-chat"><span data-icon="plus"></span>새 요청</button></div>
+        <div class="setup-banner" id="setup-banner"><span class="banner-icon" data-icon="link"></span><div><strong>워크스페이스를 연결해 시작하세요</strong><p>프로그램을 확인하고 프롬프트를 실행할 수 있습니다.</p></div><button class="button small secondary" id="setup-action">연결하기<span data-icon="arrow"></span></button></div>
+        <div class="prompt-layout">
+          <div class="prompt-column">
+            <form class="composer" id="prompt-form">
+              <div class="composer-label"><span class="icon-tile small blue" data-icon="spark"></span><label for="prompt-input">새로운 요청</label><span class="keyboard-hint">Ctrl + Enter</span></div>
+              <textarea id="prompt-input" name="prompt" rows="6" maxlength="12000" placeholder="어떤 작업이 필요한가요?&#10;예: CSV value 열 값 1, 2, 3의 통계를 계산해줘" required></textarea>
+              <div class="composer-options"><label class="check-label" title="재사용 가치 평가를 통과한 기능만 응답 후 별도로 생성합니다."><input type="checkbox" id="allow-build" checked><span>필요하면 프로그램 자동 생성</span></label><label class="check-label"><input type="checkbox" id="explain-result"><span>결과 설명 포함</span></label></div>
+              <div class="composer-footer"><span id="prompt-count">0 / 12,000</span><button class="button primary" id="send-button" type="submit"><span>요청 보내기</span><span data-icon="arrow"></span></button></div>
+            </form>
+            <div class="examples" id="examples"><span>이렇게 시작해보세요</span><div id="example-buttons"></div></div>
+            <div class="results-heading"><h2>응답</h2><span id="result-count">새 요청을 기다리고 있어요</span></div>
+            <div id="results" aria-live="polite" aria-relevant="additions"><div class="empty-result"><span class="empty-icon" data-icon="message"></span><strong>결과가 여기에 표시됩니다</strong><p>프로그램 실행 결과와 AI 답변을 함께 확인하세요.</p></div></div>
+          </div>
+          <aside class="context-panel" aria-label="실행 환경">
+            <div class="section-kicker">지금 사용할 수 있는 기능</div><div class="available-number"><strong id="available-count">–</strong><span>개 프로그램</span><span class="green-pill">READY</span></div>
+            <div id="ready-programs" class="ready-programs"><p class="muted">연결 후 확인할 수 있습니다.</p></div><button class="text-button" data-page="programs">전체 프로그램 보기<span data-icon="arrow"></span></button>
+            <div class="context-divider"></div>
+            <div class="section-kicker">요청은 이렇게 처리돼요</div><ol class="flow-list"><li><span>1</span><div><strong>프로그램 찾기</strong><p>요청에 맞는 기능을 먼저 검색해요.</p></div></li><li><span>2</span><div><strong>빠르게 실행하기</strong><p>사용 가능한 프로그램으로 처리해요.</p></div></li><li><span>3</span><div><strong>필요할 때 AI 답변</strong><p>프로그램이 없으면 AI가 답변해요.</p></div></li></ol>
+            <div class="model-mini"><span data-icon="spark"></span><div><small>답변 모델</small><strong id="current-model">설정 필요</strong></div><button class="icon-button" data-page="settings" aria-label="답변 모델 설정"><span data-icon="arrow"></span></button></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="page" id="page-programs" hidden aria-labelledby="programs-title">
+        <div class="page-heading"><div><div class="eyebrow">PROGRAM LIBRARY</div><h1 id="programs-title">프로그램</h1><p>등록된 기능과 연결 상태를 확인하세요.</p></div><span class="count-label" id="program-total">–개 등록됨</span></div>
+        <div class="summary-strip"><div><span class="summary-icon blue" data-icon="grid"></span><div><small>전체 프로그램</small><strong id="summary-total">–</strong></div></div><div><span class="summary-icon green" data-icon="check"></span><div><small>사용 가능</small><strong id="summary-active">–</strong></div></div><div><span class="summary-icon amber" data-icon="sliders"></span><div><small>설정 대기</small><strong id="summary-disabled">–</strong></div></div></div>
+        <div class="library-toolbar"><div class="filter-tabs" role="group" aria-label="프로그램 상태 필터"><button class="active" data-filter="all">전체</button><button data-filter="ACTIVE">사용 가능</button><button data-filter="DISABLED">설정 대기</button><button data-filter="internal">내부 기능</button></div><label class="search-input"><span data-icon="search"></span><input id="program-search" type="search" placeholder="프로그램 검색" aria-label="프로그램 이름 또는 설명 검색"></label></div>
+        <div class="program-grid" id="program-grid"></div><div class="pagination" id="pagination" hidden><button class="button secondary small" id="previous-page">이전</button><span id="page-info"></span><button class="button secondary small" id="next-page">다음</button></div>
+      </section>
+
+      <section class="page settings-page" id="page-settings" hidden aria-labelledby="settings-title">
+        <div class="page-heading"><div><div class="eyebrow">CONNECTION & MODELS</div><h1 id="settings-title">연결 및 모델 설정</h1><p>AI 제공자를 연결하고, 작업별로 사용할 모델을 선택하세요.</p></div><span class="unsaved-pill" id="unsaved-pill" hidden>저장되지 않은 변경</span></div>
+        <div class="readonly-note" id="settings-access-note" hidden>설정을 변경하려면 관리자 접속 키로 연결해주세요.</div>
+        <form id="settings-form">
+          <fieldset id="settings-fields" disabled>
+            <section class="settings-card"><div class="card-title"><div class="icon-tile blue" data-icon="link"></div><div><h2>AI 제공자 연결</h2><p>API 키로 연결하고 사용 가능한 모델을 확인합니다.</p></div><span class="connection-state" id="key-state">미연결</span></div>
+              <div class="provider-options" role="group" aria-label="AI 제공자"><button type="button" class="provider-option chosen" data-provider="openai"><span class="provider-logo">O</span><span><strong>OpenAI</strong><small>OpenAI API 계정</small></span><span class="radio-mark"></span></button><button type="button" class="provider-option" data-provider="compatible"><span class="provider-logo" data-icon="code"></span><span><strong>OpenAI 호환 API</strong><small>다른 제공자 또는 사설 모델</small></span><span class="radio-mark"></span></button></div>
+              <label class="field-label" for="base-url">API 주소</label><input class="field" id="base-url" type="url" value="https://api.openai.com/v1" required autocomplete="url"><p class="field-help">제공자의 API 기본 주소를 입력해주세요. 보통 <code>/v1</code>로 끝납니다.</p>
+              <div class="field-label-row"><label class="field-label" for="provider-key">API 키</label><a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" id="api-key-link">OpenAI에서 키 발급<span data-icon="external"></span></a></div><div class="password-field"><input class="field" id="provider-key" type="password" placeholder="API 키 입력" autocomplete="new-password"><button type="button" class="icon-button" id="show-key" aria-label="입력 중인 API 키 표시"><span data-icon="eye"></span></button></div><div class="key-help-row"><p class="field-help" id="key-help">키는 서버에 암호화해 보관하며, 저장 후에는 표시하지 않습니다.</p><label class="check-label" id="clear-key-label" hidden><input type="checkbox" id="clear-key">저장된 키 삭제</label></div>
+              <div class="connection-test-row"><button class="button secondary" id="test-connection" type="button"><span data-icon="link"></span>연결 확인 및 모델 가져오기</button><span id="test-result" role="status"></span></div>
+              <div class="info-note"><span data-icon="info"></span><p>OpenAI API 키를 사용합니다. ChatGPT 로그인 정보나 구독은 이 연결에 사용하지 않습니다.</p></div>
+            </section>
+            <section class="settings-card"><div class="card-title"><div class="icon-tile violet" data-icon="spark"></div><div><h2>작업별 모델</h2><p>연결 확인 후 목록에서 선택하거나 모델 이름을 직접 입력하세요.</p></div></div><datalist id="model-options"></datalist>
+              <div class="model-grid"><div class="model-field"><label for="main-model"><span class="role-number">01</span><strong>일반 답변</strong><span>Main</span></label><p>프로그램으로 처리할 수 없는 질문에 답합니다.</p><input class="field" id="main-model" list="model-options" placeholder="답변에 사용할 모델" autocomplete="off"></div><div class="model-field"><label for="router-model"><span class="role-number">02</span><strong>프로그램 선택</strong><span>Router</span></label><p>검색된 후보에서 적합한 프로그램을 고릅니다.</p><input class="field" id="router-model" list="model-options" placeholder="선택에 사용할 모델" autocomplete="off"></div><div class="model-field"><label for="evaluator-model"><span class="role-number">03</span><strong>재사용 가치 평가</strong><span>Evaluator</span></label><p>새 프로그램을 만들 가치가 있는지 평가합니다.</p><input class="field" id="evaluator-model" list="model-options" placeholder="평가에 사용할 모델" autocomplete="off"></div><div class="model-field"><label for="builder-model"><span class="role-number">04</span><strong>프로그램 생성</strong><span>Builder</span></label><p>Python 프로그램과 테스트 코드를 만듭니다.</p><input class="field" id="builder-model" list="model-options" placeholder="생성에 사용할 모델" autocomplete="off"></div></div>
+              <p class="model-note"><span data-icon="info"></span>명확한 프로그램 요청은 모델을 호출하지 않고 바로 실행합니다.</p>
+            </section>
+          </fieldset>
+          <div class="save-bar"><span id="save-caption"><span data-icon="lock"></span>설정은 서버에 안전하게 보관됩니다.</span><div><button type="button" class="button secondary" id="reset-settings">변경 취소</button><button type="submit" class="button primary" id="save-settings" disabled><span data-icon="check"></span>설정 저장</button></div></div>
+        </form>
+      </section>
+    </main>
+    <footer class="app-footer"><span>Agent Foundry</span><span>필요한 기능을 찾아, 정확한 결과로.</span></footer>
+  </div>
+
+  <dialog id="login-dialog" class="login-dialog"><form id="login-form"><div class="dialog-top"><span class="icon-tile blue" data-icon="lock"></span><button type="button" class="icon-button" data-close="login-dialog" aria-label="연결창 닫기"><span data-icon="close"></span></button></div><h2>워크스페이스 연결</h2><p>이 서버의 접속 키를 입력해주세요.<br>OpenAI API 키는 연결 후 설정에서 등록합니다.</p><label class="field-label" for="access-key">워크스페이스 접속 키</label><input class="field" id="access-key" type="password" autocomplete="current-password" required><p class="field-help">관리자 키로 접속하면 AI 연결과 모델 설정을 변경할 수 있습니다.</p><p id="login-error" class="inline-error" role="alert"></p><button class="button primary full-width" id="login-submit" type="submit">워크스페이스 연결<span data-icon="arrow"></span></button></form></dialog>
+  <dialog id="program-dialog" class="program-dialog"><div id="program-detail"></div></dialog>
+  <div class="toast-region" id="toast-region" role="status" aria-live="polite"></div>
+</body>
+</html>

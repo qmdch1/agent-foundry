@@ -1,12 +1,15 @@
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 
 from .config import Settings
+from .console import console_router
 from .container import Container
 from .models import AgentRequest, StrictModel
 from .security import PolicyError
@@ -38,14 +41,34 @@ def create_app(settings=None, container=None):
         if not expected:
             raise HTTPException(503, "API authentication is not configured")
         supplied = (authorization or "").removeprefix("Bearer ")
-        if not secrets.compare_digest(expected, supplied):
+        if not secrets.compare_digest(expected.encode(), supplied.encode()):
             raise HTTPException(401, "Invalid credentials")
 
-    async def user_auth(authorization: str | None = Header(None)):
-        auth(settings.api_key.get_secret_value(), authorization)
+    async def user_auth(request: Request, authorization: str | None = Header(None)):
+        if authorization is not None:
+            auth(settings.api_key.get_secret_value(), authorization)
+        else:
+            await services.web_sessions.authorize(request)
 
-    async def admin_auth(authorization: str | None = Header(None)):
-        auth(settings.admin_key.get_secret_value(), authorization)
+    async def admin_auth(request: Request, authorization: str | None = Header(None)):
+        if authorization is not None:
+            auth(settings.admin_key.get_secret_value(), authorization)
+        else:
+            await services.web_sessions.authorize(request, admin=True)
+
+    @app.middleware("http")
+    async def browser_headers(request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Frame-Options"] = "DENY"
+        if request.url.path not in {"/docs", "/redoc", "/docs/oauth2-redirect"}:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+            )
+        if request.url.path.startswith(("/ui/", "/admin/", "/v1/")) or request.url.path == "/":
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.exception_handler(PolicyError)
     async def policy_error(request, exc):
@@ -60,7 +83,8 @@ def create_app(settings=None, container=None):
     async def ready():
         try:
             await services.db.fetch("SELECT id FROM agent.programs LIMIT 1")
-            return {"status": "ready", "llm_configured": bool(settings.main_model)}
+            profile = await services.profiles.current()
+            return {"status": "ready", "llm_configured": bool(profile.main_model)}
         except Exception:
             raise HTTPException(503, "Registry unavailable") from None
 
@@ -120,6 +144,8 @@ def create_app(settings=None, container=None):
             )
         }
 
+    app.include_router(console_router(services))
+    app.mount("/assets", StaticFiles(directory=Path(__file__).with_name("web")), name="web-assets")
     return app
 
 

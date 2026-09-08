@@ -7,15 +7,19 @@ from .security import PolicyError
 
 
 class LLM:
-    def __init__(self, settings, db, client=None):
+    def __init__(self, settings, db, client=None, profiles=None):
         self.settings, self.db = settings, db
+        self.profiles = profiles
         self.client = client or httpx.AsyncClient(timeout=settings.llm_timeout, trust_env=False)
 
     async def close(self):
         await self.client.aclose()
 
     async def call(self, role, system, user, *, structured=False, request_id=None):
-        model = getattr(self.settings, f"{role}_model")
+        profile = await self.profiles.current() if self.profiles else None
+        model = getattr(profile or self.settings, f"{role}_model")
+        api_key = profile.api_key if profile else self.settings.llm_api_key
+        base_url = profile.base_url if profile else self.settings.llm_base_url
         if not model:
             raise PolicyError(f"Configure FOUNDRY_{role.upper()}_MODEL")
         started = time.monotonic()
@@ -29,10 +33,10 @@ class LLM:
         success, usage = False, {}
         try:
             headers = {}
-            if self.settings.llm_api_key.get_secret_value():
-                headers["Authorization"] = f"Bearer {self.settings.llm_api_key.get_secret_value()}"
+            if api_key.get_secret_value():
+                headers["Authorization"] = f"Bearer {api_key.get_secret_value()}"
             response = await self.client.post(
-                self.settings.llm_base_url.rstrip("/") + "/chat/completions", json=payload, headers=headers
+                base_url.rstrip("/") + "/chat/completions", json=payload, headers=headers
             )
             response.raise_for_status()
             data = response.json()

@@ -43,6 +43,9 @@ async def execute(args):
                 print("Migration and primitive seed completed")
             case "worker":
                 await container.worker.run(once=args.once)
+            case "web-login":
+                token = await container.web_sessions.create_launch()
+                print(args.url.rstrip("/") + "/#connect=" + token)
             case "reconcile":
                 results = await container.deployment.reconcile()
                 print(json.dumps(results))
@@ -101,4 +104,6 @@ def main():
     register.add_argument("manifest")
     primitive = commands.add_parser("enable-primitive")
     primitive.add_argument("name")
+    web_login = commands.add_parser("web-login")
+    web_login.add_argument("--url", default="http://localhost:8000")
     asyncio.run(execute(parser.parse_args()))

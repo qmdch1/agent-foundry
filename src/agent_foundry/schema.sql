@@ -45,3 +45,16 @@ CREATE TABLE IF NOT EXISTS agent.tool_migrations (
     applied_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS tool_migrations_lookup ON agent.tool_migrations(program_id, checksum);
+CREATE TABLE IF NOT EXISTS agent.console_settings (
+    name text NOT NULL, encrypted_payload text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS console_settings_name ON agent.console_settings(name);
+CREATE TABLE IF NOT EXISTS agent.web_sessions (
+    token_hash text NOT NULL, role text NOT NULL, csrf_token text NOT NULL,
+    expires_at timestamptz NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS web_sessions_token ON agent.web_sessions(token_hash);
+CREATE TABLE IF NOT EXISTS agent.web_launches (
+    token_hash text NOT NULL, expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS web_launches_token ON agent.web_launches(token_hash);

@@ -4,12 +4,14 @@ from .db import Database
 from .deployment import Deployment
 from .executor import Executor
 from .llm import LLM
+from .profiles import ProfileStore
 from .queue import JobQueue
 from .registry import Registry
 from .router import Router
 from .sandbox import Sandbox
 from .search import ProgramSearch
 from .service import AgentService
+from .web_auth import WebSessions
 from .worker import Worker
 
 
@@ -18,7 +20,9 @@ class Container:
         self.settings = settings
         self.db = Database(settings)
         self.registry = Registry(self.db)
-        self.llm = LLM(settings, self.db)
+        self.profiles = ProfileStore(self.db, settings)
+        self.web_sessions = WebSessions(self.db, settings)
+        self.llm = LLM(settings, self.db, profiles=self.profiles)
         self.search = ProgramSearch(self.db, settings)
         self.router = Router(self.llm, settings)
         self.queue = JobQueue(self.db, settings)
