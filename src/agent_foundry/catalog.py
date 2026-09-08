@@ -3,6 +3,7 @@ from pathlib import Path
 
 from psycopg.types.json import Jsonb
 
+from .generation_tokens import FILENAME, parse_total
 from .models import Manifest
 from .search import ProgramSearch
 from .security import PolicyError
@@ -85,9 +86,17 @@ class Catalog:
                     row = old[path]
                     m = Manifest.model_validate(row["manifest"])
                     commit, published = row["git_commit"], row["published_at"]
+                    creation_tokens = row.get("creation_tokens")
                 else:
                     raw = await git("show", f"{head}:{path}/manifest.json", limit=128_000)
                     m = Manifest.model_validate_json(raw)
+                    token_file = f"{path}/{FILENAME}"
+                    token_entry = (await git("ls-tree", head, "--", token_file)).decode().strip()
+                    creation_tokens = None
+                    if token_entry:
+                        if not token_entry.startswith("100644 blob "):
+                            raise PolicyError("Generation tokens must be an ordinary text file")
+                        creation_tokens = parse_total(await git("show", f"{head}:{token_file}", limit=64))
                     if m.name != name:
                         raise PolicyError("Catalog folder and manifest name differ")
                     commit, published = (
@@ -120,6 +129,7 @@ class Catalog:
                         commit,
                         tree,
                         published,
+                        creation_tokens,
                     )
                 )
                 if len(rows) > self.settings.catalog_max_programs:
@@ -131,8 +141,8 @@ class Catalog:
                     await cursor.executemany(
                         """INSERT INTO agent.catalog
                         (id,name,description,version,runtime,execution_type,manifest,input_schema,output_schema,
-                         tags,examples,search_text,search_vector,repository,repository_path,git_commit,source_tree,published_at)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,to_tsvector('simple',%s),%s,%s,%s,%s,%s)""",
+                         tags,examples,search_text,search_vector,repository,repository_path,git_commit,source_tree,published_at,creation_tokens)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,to_tsvector('simple',%s),%s,%s,%s,%s,%s,%s)""",
                         rows,
                     )
                 await conn.execute("DELETE FROM agent.catalog_sync")

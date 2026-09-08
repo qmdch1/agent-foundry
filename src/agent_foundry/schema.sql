@@ -63,6 +63,7 @@ ALTER TABLE agent.programs ADD COLUMN IF NOT EXISTS last_deployed_at timestamptz
 ALTER TABLE agent.programs ADD COLUMN IF NOT EXISTS estimated_tokens_saved bigint NOT NULL DEFAULT 0;
 ALTER TABLE agent.programs ADD COLUMN IF NOT EXISTS attributed_llm_tokens bigint NOT NULL DEFAULT 0;
 ALTER TABLE agent.programs ADD COLUMN IF NOT EXISTS savings_sample_count bigint NOT NULL DEFAULT 0;
+ALTER TABLE agent.programs ADD COLUMN IF NOT EXISTS creation_tokens bigint;
 UPDATE agent.programs SET installed_at=created_at,last_deployed_at=updated_at
     WHERE status='ACTIVE' AND installed_at IS NULL;
 CREATE TABLE IF NOT EXISTS agent.catalog (
@@ -77,6 +78,7 @@ CREATE TABLE IF NOT EXISTS agent.catalog (
 CREATE INDEX IF NOT EXISTS catalog_id ON agent.catalog(id);
 CREATE INDEX IF NOT EXISTS catalog_search ON agent.catalog USING gin(search_vector);
 CREATE INDEX IF NOT EXISTS catalog_trigram ON agent.catalog USING gin(search_text gin_trgm_ops);
+ALTER TABLE agent.catalog ADD COLUMN IF NOT EXISTS creation_tokens bigint;
 CREATE TABLE IF NOT EXISTS agent.catalog_sync (
     repository text NOT NULL, git_commit text NOT NULL, synced_at timestamptz NOT NULL DEFAULT now()
 );

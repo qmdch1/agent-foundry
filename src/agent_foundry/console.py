@@ -111,6 +111,7 @@ def console_router(services):
             """SELECT id,name,description,version,runtime,execution_type,status,tags,
             usage_count,success_count,failure_count,avg_latency_ms,last_used_at,git_commit,
             installed_at,last_deployed_at,estimated_tokens_saved,attributed_llm_tokens,savings_sample_count,
+            creation_tokens,
             manifest->>'visibility' AS visibility,examples,input_schema,output_schema,
             (manifest->>'requires_db')::boolean AS requires_db,
             (SELECT jsonb_build_object('connection_name',d.connection_name,'schema_name',d.schema_name,
@@ -136,6 +137,7 @@ def console_router(services):
             (c.manifest->>'requires_db')::boolean AS requires_db,
             COALESCE(p.usage_count,0) AS usage_count,COALESCE(p.avg_latency_ms,0) AS avg_latency_ms,
             p.installed_at,p.last_deployed_at,p.estimated_tokens_saved,p.status AS local_status,'github' AS source
+            ,c.creation_tokens
             FROM agent.catalog c LEFT JOIN agent.programs p ON p.id=c.id
             WHERE c.name ILIKE %s OR c.description ILIKE %s ORDER BY c.name LIMIT 50 OFFSET %s""",
             (*params, offset),

@@ -4,6 +4,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+from .generation_tokens import read_total
 from .models import Manifest
 from .program_databases import ProgramDatabases
 from .security import PolicyError, safe_path
@@ -52,6 +53,7 @@ class Deployment:
         return await self.databases.ensure(manifest, commit)
 
     async def deploy(self, manifest, directory, commit, *, activate=True):
+        creation_tokens = read_total(directory)
         image = await self.sandbox.build(directory, manifest)
         evidence = await self.sandbox.validate(image, manifest)
         await self.apply_tables(manifest, commit)
@@ -67,6 +69,11 @@ class Deployment:
             json.dump(receipt, stream)
             temporary = Path(stream.name)
         temporary.replace(parent / f"{commit}.json")
+        if not activate:
+            await self.registry.db.execute(
+                "UPDATE agent.programs SET creation_tokens=%s WHERE id=%s AND git_commit=%s",
+                (creation_tokens, manifest.program_id, commit),
+            )
         if activate:
             await self.registry.register(
                 manifest,
@@ -75,6 +82,7 @@ class Deployment:
                 path=f"tools/{manifest.name}",
                 commit=commit,
                 evidence=evidence,
+                creation_tokens=creation_tokens,
             )
         await self.registry.db.event(
             "deployment",

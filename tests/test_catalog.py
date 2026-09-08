@@ -84,6 +84,7 @@ async def publish(container, tmp_path):
     tool = root / "tools/temperature-converter"
     (tool / "app").mkdir(parents=True)
     (tool / "tests").mkdir()
+    (tool / "generation_tokens.txt").write_text("246\n")
     manifest = Manifest(
         name="temperature-converter",
         version="1.0.0",
@@ -134,6 +135,9 @@ async def publish(container, tmp_path):
 async def test_catalog_indexes_only_pushed_sources_and_preserves_immutable_tool_revision(container, tmp_path):
     manifest, commit, root = await publish(container, tmp_path)
     assert (await container.catalog.sync())["programs"] == 1
+    assert (await container.db.fetch("SELECT creation_tokens FROM agent.catalog"))[0][
+        "creation_tokens"
+    ] == 246
     candidates = await container.catalog.search.search("Convert 0 Celsius to Fahrenheit")
     assert candidates[0].program_id == manifest.program_id and candidates[0].mapped_input == {"celsius": 0}
     assert not await container.db.fetch("SELECT id FROM agent.programs WHERE id=%s", (manifest.program_id,))

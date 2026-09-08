@@ -30,3 +30,5 @@
 @media(max-width:540px){.summary-category{padding:10px 6px;min-height:78px;gap:0}.summary-strip>div,.summary-strip>div+div{padding-left:0;border-left:0}.summary-strip{gap:6px}.summary-category small{font-size:11px}}
 
 .program-card-footer{flex-wrap:wrap;gap:9px}.program-use-metrics{display:inline-flex;align-items:center;gap:10px;margin-left:auto;color:#66758a}.program-use-metrics>span{white-space:nowrap;display:inline-flex;align-items:center;gap:3px}
+
+.program-card-top{flex-wrap:wrap;gap:10px}.program-identity{display:inline-flex;align-items:center;gap:9px;min-width:0}.creation-tokens{font-size:11px;line-height:1.5;color:#66758a}.program-identity>.icon-tile{flex-shrink:0}

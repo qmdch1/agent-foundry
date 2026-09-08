@@ -14,6 +14,27 @@ class UsageAccounting:
         tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
         return tokens if type(tokens) is int and 0 <= tokens <= 1_000_000_000 else None
 
+    async def record_build(self, program_id, commit, build_id, parent_request_id=None):
+        # One independent identifier covers all generation/repair attempts, never user-answer tokens.
+        rows = await self.db.fetch(
+            """SELECT data FROM agent.events WHERE request_id=%s AND event_type='llm'
+            AND data->>'role'='builder' ORDER BY created_at""",
+            (build_id,),
+        )
+        tokens = [self.reported_tokens(row["data"]) for row in rows]
+        data = {
+            "program_id": str(program_id),
+            "git_commit": commit,
+            "build_id": str(build_id),
+            "parent_request_id": str(parent_request_id) if parent_request_id else None,
+            "total_tokens": sum(tokens) if tokens and all(t is not None for t in tokens) else None,
+            "reported_tokens": sum(t for t in tokens if t is not None),
+            "llm_calls": len(tokens),
+            "missing_usage_calls": sum(t is None for t in tokens),
+        }
+        await self.db.event("program_build_usage", data, build_id)
+        return data
+
     async def record(self, request_id, fingerprint, prompt, route, program_ids, result):
         events = await self.db.fetch(
             """SELECT data FROM agent.events WHERE request_id=%s AND event_type='llm'

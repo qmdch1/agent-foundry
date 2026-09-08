@@ -14,7 +14,17 @@ class Registry:
             raise PolicyError("Program is not uniquely registered and active")
         return rows[0]
 
-    async def register(self, manifest: Manifest, *, status, repository="", path="", commit="", evidence=None):
+    async def register(
+        self,
+        manifest: Manifest,
+        *,
+        status,
+        repository="",
+        path="",
+        commit="",
+        evidence=None,
+        creation_tokens=None,
+    ):
         if status == "ACTIVE" and manifest.runtime == "python":
             import re
 
@@ -88,6 +98,10 @@ class Registry:
                             to_tsvector('simple',%s))""",
                     values,
                 )
+            await conn.execute(
+                "UPDATE agent.programs SET creation_tokens=%s WHERE id=%s",
+                (creation_tokens, manifest.program_id),
+            )
             if status == "ACTIVE":
                 await conn.execute(
                     "UPDATE agent.programs SET installed_at=COALESCE(installed_at,now()),last_deployed_at=now() WHERE id=%s",

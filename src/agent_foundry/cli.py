@@ -14,6 +14,15 @@ from .seed import seed
 
 
 async def execute(args):
+    if args.command == "tool-tokens":
+        from .generation_tokens import add_tokens
+
+        directory = Path(args.path).resolve()
+        if not (directory / "manifest.json").is_file():
+            raise PolicyError("Choose an existing program directory with a manifest")
+        total = add_tokens(directory, args.add, initial=args.initial)
+        print(total if total is not None else "미집계")
+        return
     if args.command == "init-env":
         destination = Path(".env")
         if destination.exists():
@@ -97,6 +106,12 @@ def main():
     for name in ("init-env", "migrate", "reconcile", "catalog-sync"):
         commands.add_parser(name)
     worker = commands.add_parser("worker")
+    tokens = commands.add_parser("tool-tokens")
+    tokens.add_argument("path")
+    tokens.add_argument("--add", type=int, required=True, help="Reported tokens for this generation/edit")
+    tokens.add_argument(
+        "--initial", action="store_true", help="First generation only; refuses an existing counter"
+    )
     worker.add_argument("--once", action="store_true")
     rollback = commands.add_parser("rollback")
     rollback.add_argument("program_id")
