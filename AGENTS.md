@@ -28,3 +28,5 @@
 - Keep source and declarative table definitions in agent-tools; never publish operational data or credentials. Reuse the same schema/data on upgrades and rollback, and recreate schemas on other main servers from pinned Git manifests. Restore data and the encryption key from separate backups.
 
 - User-authorized exception: count Codex-authored tools without usage telemetry using ceil(UTF-8 bytes of app/*.py and tests/*.py / 4), with manifest generation_tokens_estimated=true and UI label 생성 약 N 토큰. This is a source-size proxy, never actual session billing. On later session edits, add the proxy for modified Python files once. Retain the estimate flag when adding reported API usage to an estimated baseline. Save only the final cumulative total. Initial tools: csv-statistics, record-store, hrms.
+
+- Display generation totals as 생성 N 토큰 without 약 per the user's latest wording preference. Retain generation_tokens_estimated metadata and the explanatory tooltip; removing the qualifier does not turn source-size estimates into actual session usage.
