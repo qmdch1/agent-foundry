@@ -22,6 +22,9 @@ class Provider:
     docs_url: str
     protocol: str = "chat"
     token_field: str = "max_tokens"
+    console_url: str = ""
+    setup_url: str = ""
+    setup_hint: str = ""
 
 
 PROVIDERS = {
@@ -35,15 +38,21 @@ PROVIDERS = {
             "https://platform.openai.com/api-keys",
             "https://platform.openai.com/docs/api-reference/chat",
             token_field="max_completion_tokens",
+            console_url="https://platform.openai.com/",
+            setup_url="https://developers.openai.com/api/docs/quickstart",
+            setup_hint="OpenAI Platform에 로그인하고 API Keys에서 사용할 프로젝트의 키를 만드세요.",
         ),
         Provider(
             "anthropic",
             "Anthropic Claude",
             "Claude 모델",
             "https://api.anthropic.com/v1",
-            "https://platform.claude.com/",
+            "https://platform.claude.com/settings/keys",
             "https://platform.claude.com/docs/en/api/messages/create",
             "anthropic",
+            console_url="https://platform.claude.com/",
+            setup_url="https://platform.claude.com/docs/en/get-started",
+            setup_hint="Claude Console에 로그인하고 Settings → API keys에서 키를 만드세요.",
         ),
         Provider(
             "gemini",
@@ -53,14 +62,20 @@ PROVIDERS = {
             "https://aistudio.google.com/apikey",
             "https://ai.google.dev/api/generate-content",
             "gemini",
+            console_url="https://aistudio.google.com/",
+            setup_url="https://ai.google.dev/gemini-api/docs/api-key?hl=ko",
+            setup_hint="Google 계정으로 AI Studio에 로그인하고 프로젝트를 선택해 새 API 키를 만드세요.",
         ),
         Provider(
             "deepseek",
             "DeepSeek",
             "DeepSeek 모델",
             "https://api.deepseek.com",
-            "https://platform.deepseek.com/",
+            "https://platform.deepseek.com/api_keys",
             "https://api-docs.deepseek.com/",
+            console_url="https://platform.deepseek.com/",
+            setup_url="https://api-docs.deepseek.com/",
+            setup_hint="DeepSeek Platform에 로그인하고 API keys에서 키를 만드세요.",
         ),
         Provider(
             "groq",
@@ -70,6 +85,9 @@ PROVIDERS = {
             "https://console.groq.com/keys",
             "https://console.groq.com/docs/openai",
             token_field="max_completion_tokens",
+            console_url="https://console.groq.com/",
+            setup_url="https://console.groq.com/docs/quickstart",
+            setup_hint="Groq Console에 로그인하고 사용할 프로젝트의 API Keys에서 키를 만드세요.",
         ),
         Provider(
             "mistral",
@@ -78,6 +96,9 @@ PROVIDERS = {
             "https://api.mistral.ai/v1",
             "https://console.mistral.ai/",
             "https://docs.mistral.ai/api/endpoint/chat",
+            console_url="https://console.mistral.ai/",
+            setup_url="https://docs.mistral.ai/getting-started/quickstarts/studio/activate-and-generate-api-key",
+            setup_hint="Mistral Studio에 로그인하고 왼쪽 API Keys 메뉴에서 Create new key를 선택하세요.",
         ),
         Provider(
             "openrouter",
@@ -86,8 +107,19 @@ PROVIDERS = {
             "https://openrouter.ai/api/v1",
             "https://openrouter.ai/settings/keys",
             "https://openrouter.ai/docs/api/reference/overview",
+            console_url="https://openrouter.ai/settings/keys",
+            setup_url="https://openrouter.ai/docs/cookbook/get-started/quickstart",
+            setup_hint="OpenRouter에 로그인하고 Keys에서 사용할 워크스페이스의 API 키를 만드세요.",
         ),
-        Provider("compatible", "직접 연결", "OpenAI 호환 API · 사설 모델", "", "", ""),
+        Provider(
+            "compatible",
+            "직접 연결",
+            "OpenAI 호환 API · 사설 모델",
+            "",
+            "",
+            "",
+            setup_hint="서비스 관리자에게 받은 API 주소와 키를 입력하세요. 키가 필요 없는 서버는 키를 비워두세요.",
+        ),
     ]
 }
 

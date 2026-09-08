@@ -68,6 +68,17 @@
           <fieldset id="settings-fields" disabled>
             <section class="settings-card"><div class="card-title"><div class="icon-tile blue" data-icon="link"></div><div><h2>AI 제공자 연결</h2><p>API 키로 연결하고 사용 가능한 모델을 확인합니다.</p></div><span class="connection-state" id="key-state">미연결</span></div>
               <div class="provider-options" id="provider-options" role="group" aria-label="AI 제공자"><p class="field-help">제공자 목록을 불러오는 중입니다.</p></div>
+              <section class="provider-setup" id="provider-setup" hidden aria-labelledby="provider-setup-title">
+                <div class="provider-setup-heading"><h3 id="provider-setup-title"></h3><span>API 키 연결</span></div>
+                <p id="provider-setup-hint"></p>
+                <div class="provider-links" id="provider-links">
+                  <a class="button secondary small" id="provider-console-link" target="_blank" rel="noopener noreferrer" hidden>콘솔 로그인<span data-icon="external"></span></a>
+                  <a class="button secondary small" id="provider-keys-link" target="_blank" rel="noopener noreferrer" hidden>API 키 발급<span data-icon="external"></span></a>
+                  <a class="button secondary small" id="provider-guide-link" target="_blank" rel="noopener noreferrer" hidden>공식 연결 가이드<span data-icon="external"></span></a>
+                </div>
+                <p class="provider-external-note" id="provider-external-note">공식 사이트가 새 탭으로 열립니다. 발급한 키를 복사해 이 화면으로 돌아오세요.</p>
+                <ol class="provider-steps"><li id="provider-first-step">로그인 · 키 발급</li><li>키 입력 · 모델 조회</li><li>모델 선택 · 설정 저장</li></ol>
+              </section>
               <label class="field-label" for="base-url">API 주소</label><input class="field" id="base-url" type="url" value="https://api.openai.com/v1" required autocomplete="url"><p class="field-help">선택한 제공자의 기본 주소가 자동 입력됩니다. 별도 서버를 사용하면 주소를 변경하세요.</p>
               <div class="field-label-row"><label class="field-label" for="provider-key">API 키</label><a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" id="api-key-link">OpenAI에서 키 발급<span data-icon="external"></span></a></div><div class="password-field"><input class="field" id="provider-key" type="password" placeholder="API 키 입력" autocomplete="new-password"><button type="button" class="icon-button" id="show-key" aria-label="입력 중인 API 키 표시"><span data-icon="eye"></span></button></div><div class="key-help-row"><p class="field-help" id="key-help">키는 서버에 암호화해 보관하며, 저장 후에는 표시하지 않습니다.</p><label class="check-label" id="clear-key-label" hidden><input type="checkbox" id="clear-key">저장된 키 삭제</label></div>
               <div class="connection-test-row"><button class="button secondary" id="test-connection" type="button"><span data-icon="link"></span>연결 확인 및 모델 가져오기</button><span id="test-result" role="status"></span></div>

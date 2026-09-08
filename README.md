@@ -83,7 +83,7 @@ LLM이 설정되지 않아도 계산기와 이미 등록된 명확한 프로그�
   버전, 입력 형식, 요청 예시를 확인하고 공유 프로그램의 설치를 요청할 수 있습니다.
   목록은 50개씩 조회하며 관리자는 별도 에이전트의 작업 상태도 확인합니다.
 - **연결 및 모델 설정**: OpenAI, Claude, Gemini, DeepSeek, Groq, Mistral, OpenRouter 또는 직접 연결을 선택합니다.
-  제공자 기본 주소가 자동 입력되고 키 발급 안내가 바뀝니다. API 키로 실제 모델 목록을
+  제공자 기본 주소가 자동 입력되고 공식 콘솔 로그인·API 키 발급·연결 가이드 링크와 안내가 바뀝니다. API 키로 실제 모델 목록을
   조회합니다. Main / Router / Evaluator / Builder 모델을 별도로 지정할 수 있습니다.
   `/models` 조회를 지원하지 않는 제공자는 모델 이름을 직접 입력합니다. 연결 확인은 모델 목록
   조회이며, 모든 모델의 추론 권한이나 JSON 출력 지원까지 보장하는 검사는 아닙니다.
@@ -91,7 +91,16 @@ LLM이 설정되지 않아도 계산기와 이미 등록된 명확한 프로그�
 ### AI 제공자 연결
 
 현재 하나의 활성 제공자 연결을 저장하고 Main·Router·Evaluator·Builder가 함께 사용합니다.
-제공자 변경 → API 키 입력 → 연결 확인 및 모델 가져오기 → 역할별 모델 선택 → 설정 저장 순서입니다.
+제공자 선택 → 공식 콘솔 로그인·키 발급 → API 키 입력 → 연결 확인 및 모델 가져오기 → 역할별 모델 선택 → 설정 저장 순서입니다.
+선택한 제공자의 **연결 시작하기** 영역에서 공식 콘솔, 키 관리 화면, 시작 가이드를 새 탭으로 엽니다.
+Mistral은 콘솔의 API Keys 메뉴로 이동합니다. 직접 연결에는 외부 링크 대신 관리자에게 받은 주소·인증 정보 안내를 표시합니다.
+이 기능은 공식 사이트 바로가기입니다. 로그인 링크를 여는 동작만으로 API 인증이나 설정 저장이 이루어지지 않으며,
+OAuth 승인·콜백을 통한 자동 연결은 구현하지 않았습니다. 발급한 API 키를 입력하고 모델을 선택한 뒤 저장해야 합니다.
+공식 시작 가이드: [OpenAI](https://developers.openai.com/api/docs/quickstart),
+[Claude](https://platform.claude.com/docs/en/get-started), [Gemini](https://ai.google.dev/gemini-api/docs/api-key?hl=ko),
+[DeepSeek](https://api-docs.deepseek.com/), [Groq](https://console.groq.com/docs/quickstart),
+[Mistral](https://docs.mistral.ai/getting-started/quickstarts/studio/activate-and-generate-api-key),
+[OpenRouter](https://openrouter.ai/docs/cookbook/get-started/quickstart).
 모델을 바꿀 때 제공자가 반환한 모델 ID를 사용하며 모델명이나 유료 모델을 임의로 고정하지 않습니다.
 제공자를 바꾸면 입력 중인 키·모델 목록을 초기화합니다. 이전 키는 서버에서 새 제공자나 다른
 API 주소로 재사용하지 않습니다. 기존 연결은 새 설정을 저장하기 전까지 계속 적용됩니다.

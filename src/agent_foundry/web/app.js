@@ -180,7 +180,19 @@ function setProvider(value, changeUrl=false){
   $("#base-url").placeholder=provider?.base_url||"https://your-provider.example/v1";
   const link=$("#api-key-link");link.hidden=!provider?.key_url;
   if(provider?.key_url){link.href=provider.key_url;link.innerHTML=esc(provider.name)+" 키 발급 안내 "+icon("external");}
-  $("#provider-note").textContent=value==="compatible"?"OpenAI 호환 API의 주소와 키를 입력하세요. 사설 모델 서버도 연결할 수 있습니다.":`${provider?.name||"선택한 제공자"}의 API 키를 사용합니다. 웹 서비스 로그인이나 구독과는 별도로 연결합니다.`;
+  else link.removeAttribute("href");
+  $("#provider-setup").hidden=!provider;
+  $("#provider-setup-title").textContent=value==="compatible"?"직접 연결 안내":`${provider?.name||""} 연결 시작하기`;
+  $("#provider-setup-hint").textContent=provider?.setup_hint||"";
+  const external=value!=="compatible"&&!!provider?.console_url;
+  $("#provider-links").hidden=!external;$("#provider-external-note").hidden=!external;
+  $("#provider-first-step").textContent=external?"로그인 · 키 발급":"주소 · 인증 정보 준비";
+  [["#provider-console-link","console_url","콘솔 로그인"],["#provider-keys-link","key_url","API 키 발급"],["#provider-guide-link","setup_url","공식 연결 가이드"]].forEach(([selector,field,label])=>{
+    const anchor=$(selector),url=provider?.[field];anchor.hidden=!url;
+    if(url){anchor.href=url;anchor.setAttribute("aria-label",`${provider.name} ${label} (새 탭)`);}
+    else{anchor.removeAttribute("href");anchor.removeAttribute("aria-label");}
+  });
+  $("#provider-note").textContent=value==="compatible"?"OpenAI 호환 API의 주소와 키를 입력하세요. 사설 모델 서버도 연결할 수 있습니다.":"콘솔 로그인 후 발급한 API 키를 여기에 입력하고 설정을 저장하면 연결됩니다. 로그인 링크만 열어서는 연결 상태가 바뀌지 않습니다.";
 }
 function applySettings(profile){
   state.settings=profile;setProvider(profile.provider);$("#base-url").value=profile.base_url;$("#provider-key").value="";$("#provider-key").type="password";$("#clear-key").checked=false;$("#clear-key-label").hidden=!profile.has_api_key;
