@@ -30,3 +30,5 @@
 - User-authorized exception: count Codex-authored tools without usage telemetry using ceil(UTF-8 bytes of app/*.py and tests/*.py / 4), with manifest generation_tokens_estimated=true and UI label 생성 약 N 토큰. This is a source-size proxy, never actual session billing. On later session edits, add the proxy for modified Python files once. Retain the estimate flag when adding reported API usage to an estimated baseline. Save only the final cumulative total. Initial tools: csv-statistics, record-store, hrms.
 
 - Display generation totals as 생성 N 토큰 without 약 per the user's latest wording preference. Retain generation_tokens_estimated metadata and the explanatory tooltip; removing the qualifier does not turn source-size estimates into actual session usage.
+
+- For runtime=builtin, show 기본 내장 프로그램 beside the icon and in details instead of a generation token count or missing-usage label. This classification does not change runtime savings or usage counters.
