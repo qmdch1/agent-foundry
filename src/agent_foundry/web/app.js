@@ -119,20 +119,28 @@ const creationTokens=p=>p.runtime==="builtin"?"기본 내장 프로그램":p.cre
 const tokensPerUse=p=>Number(p.usage_count)>0?(Number(p.estimated_tokens_saved||0)/Number(p.usage_count)).toLocaleString("ko-KR",{maximumFractionDigits:1}):"0";
 const dateLabel=(value,empty="아직 설치되지 않음")=>value?new Date(value).toLocaleDateString("ko-KR"):empty;
 function badge(p){if(p.source==="github")return `<span class="badge ${p.local_status==="ACTIVE"?"active":"shared"}">${p.local_status==="ACTIVE"?"이 서버에 설치됨":"GitHub 공유"}</span>`;return p.visibility==="internal"?'<span class="badge internal">내부 기능</span>':p.status==="ACTIVE"?'<span class="badge active">사용 가능</span>':'<span class="badge disabled">설정 대기</span>';}
-async function loadPrograms(){
+let libraryPending=false, libraryView=null, librarySnapshot=null;
+async function loadPrograms({background=false}={}){
+  if(background&&libraryPending)return;
   $("#status-filters").hidden=state.source==="github";
   $$("[data-filter]").forEach(b=>{const selected=state.source==="installed"&&b.dataset.filter===state.filter;b.classList.toggle("active",selected);b.setAttribute("aria-pressed",String(selected));});
   $$("[data-source]").forEach(b=>{const selected=b.dataset.source===state.source;b.classList.toggle("active",selected);b.setAttribute("aria-pressed",String(selected));});
   if(!state.session.authenticated){$("#program-grid").innerHTML='<div class="empty-library">'+icon("lock")+'<strong>워크스페이스 연결이 필요합니다</strong><p>연결하면 등록된 프로그램을 확인할 수 있습니다.</p><button class="button secondary" data-login>연결하기</button></div>';return;}
   const sequence=++state.libraryRequest;
-  $("#program-grid").innerHTML='<div class="loading-panel"><span class="spinner"></span>프로그램을 가져오고 있습니다</div>';
+  const view=JSON.stringify([state.source,state.filter,state.query,state.offset]);
+  const preserve=background&&view===libraryView;
+  libraryPending=true;
+  if(!preserve){librarySnapshot=null;$("#program-grid").innerHTML='<div class="loading-panel"><span class="spinner"></span>프로그램을 가져오고 있습니다</div>';}
   try{
     const params=new URLSearchParams({q:state.query,status:state.filter,offset:state.offset});
     const result=await api(`/ui/${state.source==="github"?"catalog":"programs"}?${params}`);if(sequence!==state.libraryRequest)return;
     state.programs=result.items;state.total=result.total;$("#catalog-note").textContent=state.source==="github"?(result.sync?`GitHub에서 확인한 공유 프로그램 · 마지막 동기화 ${new Date(result.sync.synced_at).toLocaleString("ko-KR")}`:"공유 목록을 동기화하고 있습니다. 잠시 후 새로고침해주세요."):"이 서버에 설치·등록된 프로그램입니다.";
-    $("#program-grid").innerHTML=result.items.map(p=>`<article class="program-card"><div class="program-card-top"><span class="program-identity"><span class="icon-tile ${p.runtime==="python"?"violet":p.status==="ACTIVE"?"blue":"amber"}">${icon(toolIcon(p))}</span><span class="creation-tokens" title="${p.runtime==="builtin"?"메인 프로그램에 기본으로 포함된 기능입니다.":"저장소의 생성·수정 누적값입니다. 세션에서 작성한 프로그램은 Python 코드·테스트 크기로 환산한 값이며 실제 세션 사용량이 아닙니다."}">${creationTokens(p)}</span></span>${badge(p)}</div><h3><button class="program-name" data-program="${p.id}">${esc(names[p.name]||p.name)}</button></h3><span class="program-physical">${esc(p.name)}</span><p class="program-description">${esc(p.description)}</p><div class="program-statistics"><span>설치일 ${dateLabel(p.installed_at)}</span><span>업데이트 날짜 ${dateLabel(p.last_deployed_at,"–")}</span><span title="LLM 비교 기준으로 계산한 절감량">절약 ${Number(p.estimated_tokens_saved||0).toLocaleString()} 토큰</span></div><div class="program-card-footer"><span>${p.runtime==="python"?"Python":p.runtime==="http"?"API":"Built-in"} · v${esc(p.version)}${p.requires_db?" · 중앙 DB":""}</span><span class="program-use-metrics"><span title="누적 절약 토큰 ÷ 사용 횟수">회당 ${tokensPerUse(p)} 토큰</span><span>${Number(p.usage_count).toLocaleString()}회 사용 ${icon("chevron")}</span></span></div></article>`).join("")||'<div class="empty-library">'+icon("search")+'<strong>조건에 맞는 프로그램이 없습니다</strong><p>검색어나 필터를 변경해보세요.</p></div>';
+    const snapshot=JSON.stringify(result.items);
+    if(snapshot!==librarySnapshot)$("#program-grid").innerHTML=result.items.map(p=>`<article class="program-card"><div class="program-card-top"><span class="program-identity"><span class="icon-tile ${p.runtime==="python"?"violet":p.status==="ACTIVE"?"blue":"amber"}">${icon(toolIcon(p))}</span><span class="creation-tokens" title="${p.runtime==="builtin"?"메인 프로그램에 기본으로 포함된 기능입니다.":"저장소의 생성·수정 누적값입니다. 세션에서 작성한 프로그램은 Python 코드·테스트 크기로 환산한 값이며 실제 세션 사용량이 아닙니다."}">${creationTokens(p)}</span></span>${badge(p)}</div><h3><button class="program-name" data-program="${p.id}">${esc(names[p.name]||p.name)}</button></h3><span class="program-physical">${esc(p.name)}</span><p class="program-description">${esc(p.description)}</p><div class="program-statistics"><span>설치일 ${dateLabel(p.installed_at)}</span><span>업데이트 날짜 ${dateLabel(p.last_deployed_at,"–")}</span><span title="LLM 비교 기준으로 계산한 절감량">절약 ${Number(p.estimated_tokens_saved||0).toLocaleString()} 토큰</span></div><div class="program-card-footer"><span>${p.runtime==="python"?"Python":p.runtime==="http"?"API":"Built-in"} · v${esc(p.version)}${p.requires_db?" · 중앙 DB":""}</span><span class="program-use-metrics"><span title="누적 절약 토큰 ÷ 사용 횟수">회당 ${tokensPerUse(p)} 토큰</span><span>${Number(p.usage_count).toLocaleString()}회 사용 ${icon("chevron")}</span></span></div></article>`).join("")||'<div class="empty-library">'+icon("search")+'<strong>조건에 맞는 프로그램이 없습니다</strong><p>검색어나 필터를 변경해보세요.</p></div>';
+    libraryView=view;librarySnapshot=snapshot;
     $("#pagination").hidden=result.total<=50;$("#previous-page").disabled=state.offset===0;$("#next-page").disabled=state.offset+50>=result.total;$("#page-info").textContent=`${Math.floor(state.offset/50)+1} / ${Math.max(1,Math.ceil(result.total/50))}`;
-  }catch(e){if(sequence!==state.libraryRequest)return;$("#program-grid").innerHTML=`<div class="empty-library"><strong>목록을 가져오지 못했습니다</strong><p>${esc(e.message)}</p><button class="button secondary" id="retry-programs">다시 시도</button></div>`;}
+  }catch(e){if(sequence!==state.libraryRequest||preserve)return;$("#program-grid").innerHTML=`<div class="empty-library"><strong>목록을 가져오지 못했습니다</strong><p>${esc(e.message)}</p><button class="button secondary" id="retry-programs">다시 시도</button></div>`;}
+  finally{if(sequence===state.libraryRequest)libraryPending=false;}
 }
 function programDetail(id){
   const p=state.programs.find(p=>p.id===id);if(!p)return;
@@ -278,6 +286,6 @@ async function watchJob(id){
   }
 }
 $("#sync-catalog").addEventListener("click",async()=>{try{await api("/ui/catalog/sync",{method:"POST"});toast("GitHub 목록 동기화를 요청했습니다.");await loadActivity();}catch(e){toast(e.message,true);}});
-setInterval(()=>{if(state.session.authenticated&&state.page==="programs"&&!document.hidden){loadPrograms();if(state.session.role==="admin")loadActivity();}},15000);
+setInterval(()=>{if(state.session.authenticated&&state.page==="programs"&&!document.hidden){loadPrograms({background:true});if(state.session.role==="admin")loadActivity();}},15000);
 
 boot();
