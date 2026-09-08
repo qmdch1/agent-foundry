@@ -3,6 +3,9 @@
 - Main platform repository: `https://github.com/qmdch1/agent-foundry.git`, folder `agent-foundry`.
 - Generated programs belong only to the separate sibling repository `https://github.com/qmdch1/agent-tools.git`, under `tools/<name>`. Never vendor its checkout into this repository.
 - Keep API/search/router/executor separate from evaluation/build workers. User responses never wait for tool generation.
+- Search this platform's installed Registry first, then the indexed GitHub tool catalog. Refresh the approved Git repository in the separate Worker before creating a missing capability. Import a published suitable tool instead of generating a duplicate. Never equate Git lookup failure with an empty repository.
+- Store program purpose, first installation date, latest deployment date, calls, actual attributable LLM usage, and estimated token savings in the main DB. Preserve statistics during upgrades/rollback and never label counterfactual savings as measured usage.
+- A pushed immutable tool commit must be discoverable by other platforms with independent empty Registry databases. Share source/manifests through Git only; keep credentials, prompts, operational DB data, and platform-specific usage statistics local. Installation/testing/deployment/publication run in the separate Worker, never the request handler.
 - Send only bounded Top-K public metadata to the Router. Resolve endpoints, commands, credentials and deployment locations exclusively in trusted code.
 - Prefer deterministic input mapping and zero-LLM execution. Configure thresholds, models, limits and cost weights.
 - Use an OpenAI-compatible API, as selected by the user. Configure the provider URL and each role's model; never silently choose a paid model or embed API credentials.

@@ -1,4 +1,5 @@
 from .builder import Builder, Evaluator
+from .catalog import Catalog
 from .commands import Commands
 from .db import Database
 from .deployment import Deployment
@@ -30,12 +31,18 @@ class Container:
         self.sandbox = Sandbox(self.commands, settings)
         self.executor = Executor(self.registry, self.sandbox, settings)
         self.deployment = Deployment(self.registry, self.sandbox, self.commands, settings)
+        self.catalog = Catalog(self.db, self.commands, self.deployment, self.router, settings)
         self.evaluator = Evaluator(self.llm, self.search, self.queue, settings)
         self.builder = Builder(self.llm, self.search, self.registry, self.deployment, self.commands, settings)
-        self.worker = Worker(self.queue, self.evaluator, self.builder, self.deployment, settings)
+        self.evaluator.catalog = self.catalog
+        self.builder.catalog = self.catalog
+        self.worker = Worker(
+            self.queue, self.evaluator, self.builder, self.deployment, settings, self.catalog
+        )
         self.service = AgentService(
             self.search, self.router, self.executor, self.llm, self.queue, self.db, settings
         )
+        self.service.catalog = self.catalog
 
     async def open(self):
         await self.db.open()

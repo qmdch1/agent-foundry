@@ -79,7 +79,9 @@ LLM이 설정되지 않아도 계산기와 이미 등록된 명확한 프로그�
   화면에 이전 응답을 유지하지만, 현재 각 요청은 독립적으로 처리됩니다. 대화 문맥을 다음 요청에
   자동 전달하지 않으며, 새로고침하면 화면의 응답은 사라집니다.
 - **프로그램**: 실제 Registry의 프로그램을 검색하고 사용 가능·설정 대기·내부 기능으로 구분합니다.
-  상세 화면에서 버전, 사용 횟수, 입력 형식, 요청 예시를 확인합니다. 목록은 50개씩 조회합니다.
+  ‘이 서버 프로그램’과 ‘GitHub 공유 프로그램’을 구분합니다. 설치일, 호출 횟수, 추정 절약 토큰,
+  버전, 입력 형식, 요청 예시를 확인하고 공유 프로그램의 설치를 요청할 수 있습니다.
+  목록은 50개씩 조회하며 관리자는 별도 에이전트의 작업 상태도 확인합니다.
 - **연결 및 모델 설정**: OpenAI 또는 호환 API의 기본 주소와 키를 입력하고 실제 모델 목록을
   조회합니다. Main / Router / Evaluator / Builder 모델을 별도로 지정할 수 있습니다.
   `/models` 조회를 지원하지 않는 제공자는 모델 이름을 직접 입력합니다. 연결 확인은 모델 목록
@@ -154,7 +156,7 @@ POST /v1/agent
 | --- | --- |
 | `GET /health/live`, `/health/ready` | 프로세스·Registry 상태 |
 | `POST /v1/agent` | 검색·선택·실행 또는 일반 LLM 응답 |
-| `GET /v1/programs/search?q=...` | 제한된 공개 후보 검색 |
+| `GET /v1/programs/search?q=...&source=installed` | 로컬 공개 후보 검색 (`source=github`는 공유 후보) |
 | `GET /admin/jobs/{id}` | 생성/평가 진행 상태, 암호화 payload는 제외 |
 | `GET /admin/programs`, `/admin/metrics` | 사용량·오류·지연·실측 token usage |
 | `POST /admin/programs/{id}/execute` | 관리자용 primitive 실행 |
@@ -167,6 +169,66 @@ POST /v1/agent
 LLM 제공자에게 프롬프트를 전달하는 동작은 일반 LLM 사용과 동일합니다.
 
 ## 기본 프로그램과 등록
+
+### 로컬 우선 검색과 서버 간 프로그램 공유
+
+요청은 **설치된 Registry 검색 → 공유 GitHub 카탈로그 검색 → 필요한 프로그램 설치 또는
+일반 LLM 답변 → 별도 Worker의 최신 Git 재검색 → 재사용 평가 → 필요한 경우 생성** 순서로 처리합니다.
+프로그램 생성·테스트·Git commit/push·배포·등록은 모두 `builder` 서비스의 별도 프로세스가 수행합니다.
+API 서버는 DB 조회와 작업 등록만 수행하고 설치나 생성을 기다리지 않습니다.
+
+Worker는 승인된 `agent-tools` 저장소의 pushed branch를 기본 60초마다 fetch하여
+`tools/<name>/manifest.json`을 `agent.catalog`에 색인합니다. 프로그램 소스는 DB에 저장하지
+않습니다. 실제 설치 목록인 `agent.programs`와 공유 목록은 분리되며 Router는 각 검색 단계의
+Top-K만 봅니다. 요청마다 Git 전체를 내려받거나 전체 목록을 LLM에 전달하지 않습니다.
+소스가 바뀐 Tool만 메타데이터를 다시 읽고, 관계없는 README/다른 Tool 변경은 기존 Tool의
+배포 commit을 바꾸지 않습니다.
+
+공유 프로그램이 발견되면 `INSTALL` 작업을 등록하고 설치 대기 응답을 반환합니다. Worker가
+정확한 commit을 가져와 격리 테스트·입출력 검증을 통과한 뒤 로컬 Registry를 ACTIVE로 등록합니다.
+화면의 설치 완료 알림 이후 같은 요청을 다시 실행합니다. 최초 요청을 자동 재실행하지는 않습니다.
+AI 연결이 없거나 실패해도 `DISCOVER` 작업으로 공유 프로그램을 확인할 수 있습니다.
+
+생성 전에는 캐시만 믿지 않고 최신 Git을 다시 확인합니다. Git fetch 또는 manifest 검증에
+실패하면 기존 색인을 유지하고 신규 생성을 중단합니다. Git 검색 장애를 ‘프로그램 없음’으로
+처리하지 않습니다. 애매한 기존 기능 중복은 확장 검토로 남깁니다. 자동 생성의 재사용·비용 기준은
+동일하게 적용하며 단순 질의마다 새 프로그램을 만들지 않습니다.
+
+다른 메인 서버는 **독립된 빈 DB**로 시작해도 같은 Git 저장소를 설정하고 migration·Worker를
+실행하면 공유 목록을 발견합니다. 사용하거나 설치를 요청한 프로그램만 해당 서버에 검증·설치합니다.
+동일한 공개 프로그램을 발견하는 데 첫 서버의 DB 백업은 필요하지 않습니다. 첫 서버의 운영
+데이터·설정·통계를 복구하려는 경우에는 여전히 DB 백업과 암호화 키가 필요합니다.
+
+```bash
+# Worker가 자동 동기화하며, 필요하면 관리자가 별도 CLI 프로세스로 즉시 동기화할 수 있습니다.
+docker compose exec -T builder foundry catalog-sync
+```
+
+Private 저장소는 각 서버에 읽기 credential이 필요합니다. 자동 생성 Worker의 push에는 별도의
+쓰기 credential(`FOUNDRY_GIT_TOKEN` 또는 credential helper)이 필요합니다. Compose에서는
+`.worker.env`에 `FOUNDRY_GIT_TOKEN`을 저장하면 Worker에만 전달됩니다. 파일 권한은 0600으로
+제한하고 Git과 Docker build context에서 제외합니다. Git helper는 설정된 저장소의 HTTPS
+호스트와 경로가 모두 일치할 때만 인증을 제공합니다. 선택적 env 파일 기능은 Compose 2.24+
+버전이 필요합니다. Push가 실패한
+local commit은 공유 카탈로그에 나타나지 않으며 활성 배포로 등록하지 않습니다.
+
+### 설치·호출·토큰 통계
+
+`agent.programs`는 설명, 최초 `installed_at`, 최근 `last_deployed_at`, 호출/성공/실패 횟수,
+평균 지연, `estimated_tokens_saved`, `attributed_llm_tokens`, `savings_sample_count`를 저장합니다.
+업그레이드·재설치·rollback 때 최초 설치일과 누적 통계를 유지합니다. 과거 배포의 설치일은
+기존 생성 시각에서 이관하며, 토큰 절감 통계는 이 기능 적용 이후의 요청부터 누적합니다.
+
+`agent.request_usage`에는 프롬프트 HMAC, 실제 응답 경로의 LLM 토큰 사용량, 비교 기준 토큰,
+추정 절감량과 추정 방법을 기록합니다. 같은 프롬프트에 대한 과거 실제 Main LLM 응답 토큰을
+우선 기준으로 삼고, 없으면 설정된 바이트/토큰 비율과 고정 오버헤드를 사용합니다.
+추가 LLM 호출로 절감량을 측정하지 않습니다. Router·결과 설명 호출 토큰은 절감량에서 차감합니다.
+제공자가 usage를 반환하지 않으면 해당 요청의 절감량을 미상으로 남깁니다. 여러 프로그램을
+조합한 요청은 절감량을 한 번만 계산해 나누므로 중복 합산하지 않습니다.
+
+‘절약 토큰’은 **동일 요청을 LLM으로 처리했을 경우와 비교한 추정치**이며 실측 절감 보장이나
+생성 비용을 포함한 순이익이 아닙니다. 모델·입력·출력에 따라 오차가 있습니다. 생성·평가 토큰은
+기존 역할별 LLM 이벤트에서 별도로 확인할 수 있습니다.
 
 Migration/Seed는 calculator만 ACTIVE로 등록합니다. File Reader/Writer와 승인된 DB Query는
 관리자 전용이며 `foundry enable-primitive <name>`으로 명시적으로 활성화합니다.

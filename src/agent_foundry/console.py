@@ -1,5 +1,6 @@
 import secrets
 from pathlib import Path
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
@@ -101,6 +102,7 @@ def console_router(services):
         rows = await db.fetch(
             """SELECT id,name,description,version,runtime,execution_type,status,tags,
             usage_count,success_count,failure_count,avg_latency_ms,last_used_at,git_commit,
+            installed_at,last_deployed_at,estimated_tokens_saved,attributed_llm_tokens,savings_sample_count,
             manifest->>'visibility' AS visibility,examples,input_schema,output_schema
             FROM agent.programs """
             + condition
@@ -109,6 +111,64 @@ def console_router(services):
         )
         total = await db.fetch("SELECT count(*) AS total FROM agent.programs " + condition, params)
         return {"items": rows, "total": total[0]["total"], "offset": offset, "page_size": 50}
+
+    @router.get("/ui/catalog", dependencies=[Depends(signed_in)])
+    async def catalog(q: str = "", offset: int = 0):
+        if len(q) > 200 or not 0 <= offset <= 100000:
+            raise HTTPException(422, "검색 조건을 확인해주세요.")
+        params = ("%" + q + "%", "%" + q + "%")
+        rows = await db.fetch(
+            """SELECT c.id,c.name,c.description,c.version,c.runtime,c.execution_type,
+            c.tags,c.examples,c.input_schema,c.output_schema,c.git_commit,c.published_at,
+            c.discovered_at,'public' AS visibility,c.status,
+            COALESCE(p.usage_count,0) AS usage_count,COALESCE(p.avg_latency_ms,0) AS avg_latency_ms,
+            p.installed_at,p.estimated_tokens_saved,p.status AS local_status,'github' AS source
+            FROM agent.catalog c LEFT JOIN agent.programs p ON p.id=c.id
+            WHERE c.name ILIKE %s OR c.description ILIKE %s ORDER BY c.name LIMIT 50 OFFSET %s""",
+            (*params, offset),
+        )
+        total = await db.fetch(
+            "SELECT count(*) AS total FROM agent.catalog WHERE name ILIKE %s OR description ILIKE %s", params
+        )
+        sync = await db.fetch("SELECT synced_at,git_commit FROM agent.catalog_sync LIMIT 1")
+        return {
+            "items": rows,
+            "total": total[0]["total"],
+            "offset": offset,
+            "page_size": 50,
+            "sync": sync[0] if sync else None,
+        }
+
+    @router.post("/ui/catalog/sync", dependencies=[Depends(administrator)])
+    async def sync_catalog():
+        return {"job_id": await services.queue.enqueue("CATALOG_SYNC", "manual-sync", {}, dedup_seconds=0)}
+
+    @router.post("/ui/catalog/{program_id}/install", dependencies=[Depends(signed_in)])
+    async def install_catalog(program_id: UUID):
+        rows = await db.fetch(
+            "SELECT id,repository,repository_path,git_commit FROM agent.catalog WHERE id=%s", (program_id,)
+        )
+        if len(rows) != 1:
+            raise HTTPException(404, "공유 프로그램을 찾을 수 없습니다.")
+        ref = {**rows[0], "id": str(program_id)}
+        return {
+            "job_id": await services.queue.enqueue(
+                "INSTALL", str(program_id) + ref["git_commit"], {"references": [ref]}, dedup_seconds=0
+            )
+        }
+
+    @router.get("/ui/jobs/{job_id}", dependencies=[Depends(signed_in)])
+    async def job_status(job_id: UUID):
+        job = await services.queue.get(job_id)
+        if not job:
+            raise HTTPException(404, "작업을 찾을 수 없습니다.")
+        return {k: job[k] for k in ("id", "kind", "status", "created_at", "updated_at")}
+
+    @router.get("/ui/activity", dependencies=[Depends(administrator)])
+    async def activity():
+        return await db.fetch(
+            "SELECT id,kind,status,created_at,updated_at FROM agent.jobs ORDER BY created_at DESC LIMIT 12"
+        )
 
     @router.get("/ui/settings", dependencies=[Depends(administrator)])
     async def settings():

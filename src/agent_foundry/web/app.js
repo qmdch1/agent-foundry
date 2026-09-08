@@ -33,7 +33,7 @@ const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const names = {calculator:"정확한 계산", "csv-statistics":"CSV 통계", "file-reader":"파일 읽기", "file-writer":"파일 쓰기", "database-query":"데이터베이스 조회", "http-api-caller":"HTTP API 연결", "web-search-adapter":"웹 검색", "python-executor":"Python 실행", "builder-internal":"프로그램 Builder"};
 const toolIcon = (p) => p.name === "calculator" ? "calculator" : p.name.includes("csv") ? "chart" : p.name.includes("file") ? "file" : p.name.includes("database") ? "database" : p.runtime === "python" ? "code" : p.name.includes("search") ? "search" : "link";
-const state = {session:{authenticated:false}, page:"prompt", overview:null, programs:[], settings:null, provider:"openai", filter:"all", query:"", offset:0, total:0, responses:[], busy:false, dirty:false, libraryRequest:0};
+const state = {session:{authenticated:false}, page:"prompt", overview:null, programs:[], settings:null, provider:"openai", source:"installed", filter:"all", query:"", offset:0, total:0, responses:[], busy:false, dirty:false, libraryRequest:0};
 const emptyResponse = '<div class="empty-result"><span class="empty-icon">'+icon("message")+'</span><strong>결과가 여기에 표시됩니다</strong><p>프로그램 실행 결과와 AI 답변을 함께 확인하세요.</p></div>';
 function hydrateIcons(root=document){ root.querySelectorAll("[data-icon]").forEach(el => {el.innerHTML=icon(el.dataset.icon);}); }
 function toast(message, error=false){ const el=document.createElement("div");el.className="toast"+(error?" error":"");el.textContent=message;$("#toast-region").append(el);setTimeout(()=>el.remove(),5000); }
@@ -65,7 +65,7 @@ function updateIdentity(){
   $("#settings-fields").disabled=!admin;
   $("#save-settings").disabled=!admin;
   $("#reset-settings").disabled=!admin;
-  $("#settings-access-note").hidden=admin;
+  $("#settings-access-note").hidden=admin;$("#sync-catalog").hidden=!admin;$("#worker-activity").hidden=!admin;
   if (!connected){
     state.overview=null;state.programs=[];state.settings=null;
     $("#connection-pill").classList.remove("connected");$("#connection-pill span").textContent="연결 전";
@@ -112,25 +112,27 @@ async function refresh(){
     $("#ready-programs").innerHTML=publicPrograms.slice(0,3).map(p=>`<div class="ready-program"><span class="icon-tile ${p.runtime==="python"?"violet":"blue"}">${icon(toolIcon(p))}</span><div><strong>${esc(names[p.name]||p.name)}</strong><small>${p.runtime==="python"?"Python 프로그램":"기본 프로그램"}</small></div></div>`).join("")||'<p class="muted">사용 가능한 프로그램이 없습니다.</p>';
     renderExamples(active.items);
     if(state.page==="programs")await loadPrograms();
+    if(state.session.role==="admin")await loadActivity();
   }catch(e){toast(e.message,true);}
 }
-function badge(p){return p.visibility==="internal"?'<span class="badge internal">내부 기능</span>':p.status==="ACTIVE"?'<span class="badge active">사용 가능</span>':'<span class="badge disabled">설정 대기</span>';}
+const dateLabel=value=>value?new Date(value).toLocaleDateString("ko-KR"):"아직 설치되지 않음";
+function badge(p){if(p.source==="github")return `<span class="badge ${p.local_status==="ACTIVE"?"active":"shared"}">${p.local_status==="ACTIVE"?"이 서버에 설치됨":"GitHub 공유"}</span>`;return p.visibility==="internal"?'<span class="badge internal">내부 기능</span>':p.status==="ACTIVE"?'<span class="badge active">사용 가능</span>':'<span class="badge disabled">설정 대기</span>';}
 async function loadPrograms(){
   if(!state.session.authenticated){$("#program-grid").innerHTML='<div class="empty-library">'+icon("lock")+'<strong>워크스페이스 연결이 필요합니다</strong><p>연결하면 등록된 프로그램을 확인할 수 있습니다.</p><button class="button secondary" data-login>연결하기</button></div>';return;}
   const sequence=++state.libraryRequest;
   $("#program-grid").innerHTML='<div class="loading-panel"><span class="spinner"></span>프로그램을 가져오고 있습니다</div>';
   try{
     const params=new URLSearchParams({q:state.query,status:state.filter,offset:state.offset});
-    const result=await api(`/ui/programs?${params}`);if(sequence!==state.libraryRequest)return;
-    state.programs=result.items;state.total=result.total;
-    $("#program-grid").innerHTML=result.items.map(p=>`<article class="program-card"><div class="program-card-top"><span class="icon-tile ${p.runtime==="python"?"violet":p.status==="ACTIVE"?"blue":"amber"}">${icon(toolIcon(p))}</span>${badge(p)}</div><h3><button class="program-name" data-program="${p.id}">${esc(names[p.name]||p.name)}</button></h3><span class="program-physical">${esc(p.name)}</span><p class="program-description">${esc(p.description)}</p><div class="program-card-footer"><span>${p.runtime==="python"?"Python":p.runtime==="http"?"API":"Built-in"} · v${esc(p.version)}</span><span>${Number(p.usage_count).toLocaleString()}회 사용 ${icon("chevron")}</span></div></article>`).join("")||'<div class="empty-library">'+icon("search")+'<strong>조건에 맞는 프로그램이 없습니다</strong><p>검색어나 필터를 변경해보세요.</p></div>';
+    const result=await api(`/ui/${state.source==="github"?"catalog":"programs"}?${params}`);if(sequence!==state.libraryRequest)return;
+    state.programs=result.items;state.total=result.total;$("#catalog-note").textContent=state.source==="github"?(result.sync?`GitHub에서 확인한 공유 프로그램 · 마지막 동기화 ${new Date(result.sync.synced_at).toLocaleString("ko-KR")}`:"공유 목록을 동기화하고 있습니다. 잠시 후 새로고침해주세요."):"이 서버에 설치·등록된 프로그램입니다. 토큰 절감량은 비교 기준에 따른 추정치입니다.";
+    $("#program-grid").innerHTML=result.items.map(p=>`<article class="program-card"><div class="program-card-top"><span class="icon-tile ${p.runtime==="python"?"violet":p.status==="ACTIVE"?"blue":"amber"}">${icon(toolIcon(p))}</span>${badge(p)}</div><h3><button class="program-name" data-program="${p.id}">${esc(names[p.name]||p.name)}</button></h3><span class="program-physical">${esc(p.name)}</span><p class="program-description">${esc(p.description)}</p><div class="program-statistics"><span>${p.source==="github"?"공유일":"설치일"} ${dateLabel(p.source==="github"?p.published_at:p.installed_at)}</span><span>추정 절약 ${Number(p.estimated_tokens_saved||0).toLocaleString()} 토큰</span></div><div class="program-card-footer"><span>${p.runtime==="python"?"Python":p.runtime==="http"?"API":"Built-in"} · v${esc(p.version)}</span><span>${Number(p.usage_count).toLocaleString()}회 사용 ${icon("chevron")}</span></div></article>`).join("")||'<div class="empty-library">'+icon("search")+'<strong>조건에 맞는 프로그램이 없습니다</strong><p>검색어나 필터를 변경해보세요.</p></div>';
     $("#pagination").hidden=result.total<=50;$("#previous-page").disabled=state.offset===0;$("#next-page").disabled=state.offset+50>=result.total;$("#page-info").textContent=`${Math.floor(state.offset/50)+1} / ${Math.max(1,Math.ceil(result.total/50))}`;
   }catch(e){if(sequence!==state.libraryRequest)return;$("#program-grid").innerHTML=`<div class="empty-library"><strong>목록을 가져오지 못했습니다</strong><p>${esc(e.message)}</p><button class="button secondary" id="retry-programs">다시 시도</button></div>`;}
 }
 function programDetail(id){
   const p=state.programs.find(p=>p.id===id);if(!p)return;
   const properties=Object.entries(p.input_schema.properties||{});
-  $("#program-detail").innerHTML=`<div class="dialog-top"><span class="icon-tile blue">${icon(toolIcon(p))}</span><button class="icon-button" data-close="program-dialog" aria-label="프로그램 정보 닫기">${icon("close")}</button></div>${badge(p)}<h2>${esc(names[p.name]||p.name)}</h2><span class="program-physical">${esc(p.name)}</span><p class="detail-description">${esc(p.description)}</p><dl class="detail-meta"><div><dt>상태</dt><dd>${p.status==="ACTIVE"?"사용 가능":"설정 대기"}</dd></div><div><dt>버전</dt><dd>${esc(p.version)}</dd></div><div><dt>실행 횟수</dt><dd>${Number(p.usage_count).toLocaleString()}회</dd></div><div><dt>평균 실행 시간</dt><dd>${p.usage_count?`${Math.round(p.avg_latency_ms)} ms`:"아직 실행되지 않음"}</dd></div></dl><section class="detail-section"><h3>필요한 입력</h3>${properties.length?properties.map(([name,v])=>`<p class="field-help"><code>${esc(name)}</code> · ${esc(v.description||v.type||"값")}${(p.input_schema.required||[]).includes(name)?" · 필수":""}</p>`).join(""):'<p class="field-help">별도 입력 정보가 없습니다.</p>'}</section><section class="detail-section"><h3>요청 예시</h3>${p.visibility==="public"&&p.status==="ACTIVE"&&p.examples.length?p.examples.map(e=>`<button class="example-button" data-example="${esc(e.prompt)}">${icon("message")}${esc(e.prompt)}${icon("arrow")}</button>`).join(""):'<p class="field-help">'+(p.visibility==="internal"?"시스템 내부에서 사용하는 기능입니다.":p.visibility==="admin"?"관리자 전용 기능입니다.":"연결 설정 후 사용할 수 있습니다.")+'</p>'}</section><section class="detail-section"><details><summary>실행 정보 자세히 보기</summary><pre>${esc(JSON.stringify({runtime:p.runtime,version:p.version,git_commit:p.git_commit||null,input_schema:p.input_schema,output_schema:p.output_schema},null,2))}</pre></details></section>`;
+  $("#program-detail").innerHTML=`<div class="dialog-top"><span class="icon-tile blue">${icon(toolIcon(p))}</span><button class="icon-button" data-close="program-dialog" aria-label="프로그램 정보 닫기">${icon("close")}</button></div>${badge(p)}<h2>${esc(names[p.name]||p.name)}</h2><span class="program-physical">${esc(p.name)}</span><p class="detail-description">${esc(p.description)}</p><dl class="detail-meta"><div><dt>상태</dt><dd>${p.source==="github"?(p.local_status==="ACTIVE"?"이 서버에 설치됨":"GitHub 공유"):p.status==="ACTIVE"?"사용 가능":"설정 대기"}</dd></div><div><dt>버전</dt><dd>${esc(p.version)}</dd></div><div><dt>실행 횟수</dt><dd>${Number(p.usage_count).toLocaleString()}회</dd></div><div><dt>평균 실행 시간</dt><dd>${p.usage_count?`${Math.round(p.avg_latency_ms)} ms`:"아직 실행되지 않음"}</dd></div><div><dt>최초 설치일</dt><dd>${dateLabel(p.installed_at)}</dd></div><div><dt>추정 절약 토큰</dt><dd>${Number(p.estimated_tokens_saved||0).toLocaleString()} 토큰</dd></div></dl>${p.source==="github"&&p.local_status!=="ACTIVE"?`<button class="button primary full-width" data-install="${p.id}">이 서버에 설치하기 ${icon("arrow")}</button><p class="field-help">별도 에이전트가 테스트·검증 후 설치합니다.</p>`:""}<section class="detail-section"><h3>필요한 입력</h3>${properties.length?properties.map(([name,v])=>`<p class="field-help"><code>${esc(name)}</code> · ${esc(v.description||v.type||"값")}${(p.input_schema.required||[]).includes(name)?" · 필수":""}</p>`).join(""):'<p class="field-help">별도 입력 정보가 없습니다.</p>'}</section><section class="detail-section"><h3>요청 예시</h3>${p.visibility==="public"&&(p.status==="ACTIVE"||p.source==="github")&&p.examples.length?p.examples.map(e=>`<button class="example-button" data-example="${esc(e.prompt)}">${icon("message")}${esc(e.prompt)}${icon("arrow")}</button>`).join(""):'<p class="field-help">'+(p.visibility==="internal"?"시스템 내부에서 사용하는 기능입니다.":p.visibility==="admin"?"관리자 전용 기능입니다.":"연결 설정 후 사용할 수 있습니다.")+'</p>'}</section><section class="detail-section"><details><summary>실행 정보 자세히 보기</summary><pre>${esc(JSON.stringify({runtime:p.runtime,version:p.version,git_commit:p.git_commit||null,input_schema:p.input_schema,output_schema:p.output_schema},null,2))}</pre></details></section>`;
   $("#program-dialog").showModal();
 }
 function fillPrompt(text){if($("#program-dialog").open)$("#program-dialog").close();showPage("prompt");$("#prompt-input").value=text;updatePromptCount();$("#prompt-input").focus();}
@@ -155,7 +157,8 @@ async function submitPrompt(event){
   try{
     const response=await api("/v1/agent",{method:"POST",body:JSON.stringify({prompt,...requestOptions})});
     state.responses.push(response);const duration=((performance.now()-start)/1000).toFixed(2),direct=response.route==="deterministic",tool=response.programs.length>0;
-    item.innerHTML=`<div class="response-top"><div><span class="icon-tile small blue">${icon("spark")}</span><strong>Agent Foundry</strong><span class="route-badge ${direct?"direct":""}">${direct?"프로그램 바로 실행":tool?"프로그램 실행":"AI 답변"}</span></div><button class="icon-button" data-copy="${id}" title="결과 복사" aria-label="결과 복사">${icon("copy")}</button></div><p class="request-text">${esc(prompt)}</p>${response.result!==null?resultHTML(response.result):""}${response.answer?`<div class="response-content">${esc(response.answer)}</div>`:""}<div class="response-status">${icon("check")}<span>${duration}초${direct&&!requestOptions.explain_result?" · LLM 호출 없이 처리":""}</span>${response.evaluation_job_id?'<span class="route-badge">재사용 가능성 검토 요청됨</span>':""}</div>`;
+    item.innerHTML=`<div class="response-top"><div><span class="icon-tile small blue">${icon("spark")}</span><strong>Agent Foundry</strong><span class="route-badge ${direct?"direct":""}">${direct?"프로그램 바로 실행":tool?"프로그램 실행":response.route==="installation_pending"?"공유 프로그램 설치 중":response.route==="discovery_pending"?"공유 프로그램 확인 중":"AI 답변"}</span></div><button class="icon-button" data-copy="${id}" title="결과 복사" aria-label="결과 복사">${icon("copy")}</button></div><p class="request-text">${esc(prompt)}</p>${response.result!==null?resultHTML(response.result):""}${response.answer?`<div class="response-content">${esc(response.answer)}</div>`:""}<div class="response-status">${icon("check")}<span>${duration}초${direct&&!requestOptions.explain_result?" · LLM 호출 없이 처리":""}</span>${response.usage?.estimated_tokens_saved?`<span>추정 ${Number(response.usage.estimated_tokens_saved).toLocaleString()} 토큰 절약</span>`:""}${response.installation_job_id?'<span class="route-badge">별도 에이전트에서 설치 진행</span>':response.evaluation_job_id?'<span class="route-badge">공유 프로그램 확인·재사용 평가 요청됨</span>':""}</div>`;
+    if(response.installation_job_id)watchJob(response.installation_job_id);
     $("#result-count").textContent=`${state.responses.length}개 응답`;refresh();
   }catch(e){state.responses.push({error:e.message});item.innerHTML=`<div class="response-top"><strong>요청을 완료하지 못했습니다</strong></div><p class="request-text">${esc(prompt)}</p><p class="response-error">${esc(e.message)}</p><button class="text-button" data-example="${esc(prompt)}">입력 다시 확인하기${icon("arrow")}</button>`;$("#result-count").textContent="입력과 연결 상태를 확인해주세요";}
   finally{state.busy=false;$("#send-button").disabled=false;$("#new-chat").disabled=false;$("#send-button").innerHTML='요청 보내기'+icon("arrow");}
@@ -200,6 +203,8 @@ document.addEventListener("click",async event=>{
   if(button.dataset.program)programDetail(button.dataset.program);
   if(button.dataset.example)fillPrompt(button.dataset.example);
   if(button.dataset.filter){state.filter=button.dataset.filter;state.offset=0;$$("[data-filter]").forEach(b=>b.classList.toggle("active",b===button));loadPrograms();}
+  if(button.dataset.source){state.source=button.dataset.source;state.offset=0;$("#status-filters").hidden=state.source==="github";$$ ("[data-source]").forEach(b=>b.classList.toggle("active",b===button));loadPrograms();}
+  if(button.dataset.install){button.disabled=true;try{const result=await api(`/ui/catalog/${button.dataset.install}/install`,{method:"POST"});toast("설치를 요청했습니다. 별도 에이전트가 처리합니다.");watchJob(result.job_id);if($("#program-dialog").open)$("#program-dialog").close();}catch(e){toast(e.message,true);}finally{button.disabled=false;}}
   if(button.dataset.provider){setProvider(button.dataset.provider,true);markDirty();}
   if(button.dataset.copy!==undefined){const r=state.responses[Number(button.dataset.copy)];try{await navigator.clipboard.writeText(r.answer||JSON.stringify(r.result,null,2));toast("결과를 복사했습니다.");}catch{toast("복사할 수 없습니다. 결과를 직접 선택해 복사해주세요.",true);}}
   if(button.id==="retry-programs")loadPrograms();
@@ -224,4 +229,20 @@ async function boot(){
   catch(e){toast(e.message,true);}
   updateIdentity();await refresh();showPage(launch?"prompt":fragment.slice(1)||"prompt");
 }
+
+const jobLabels={EVALUATE:"공유 프로그램 확인·재사용 평가",DISCOVER:"공유 프로그램 검색",BUILD:"프로그램 생성·배포",INSTALL:"공유 프로그램 설치",CATALOG_SYNC:"GitHub 목록 동기화",RECONCILE:"프로그램 복구",ROLLBACK:"이전 버전 복구"};
+const statusLabels={PENDING:"대기",RUNNING:"진행 중",SUCCEEDED:"완료",SKIPPED:"재사용 검토 / 종료",FAILED:"실패"};
+async function loadActivity(){
+  try{const jobs=await api("/ui/activity");$("#activity-list").innerHTML=jobs.length?jobs.map(j=>`<div class="activity-row"><span>${esc(jobLabels[j.kind]||j.kind)}</span><span class="badge ${j.status==="SUCCEEDED"?"active":j.status==="FAILED"?"disabled":"internal"}">${esc(statusLabels[j.status]||j.status)}</span><time>${new Date(j.created_at).toLocaleString("ko-KR")}</time></div>`).join(""):'<p class="muted">아직 별도 에이전트 작업이 없습니다.</p>';}catch(e){toast(e.message,true);}
+}
+async function watchJob(id){
+  for(let attempt=0;attempt<120;attempt++){
+    await new Promise(resolve=>setTimeout(resolve,5000));
+    if(!state.session.authenticated)return;
+    try{const job=await api(`/ui/jobs/${id}`);if(["SUCCEEDED","SKIPPED","FAILED"].includes(job.status)){toast(job.status==="SUCCEEDED"?"설치가 완료되었습니다. 같은 요청을 다시 실행해보세요.":job.status==="FAILED"?"설치에 실패했습니다. 관리자 작업 기록을 확인해주세요.":"공유 프로그램 검토가 완료되었습니다.",job.status==="FAILED");await refresh();return;}}catch{return;}
+  }
+}
+$("#sync-catalog").addEventListener("click",async()=>{try{await api("/ui/catalog/sync",{method:"POST"});toast("GitHub 목록 동기화를 요청했습니다.");await loadActivity();}catch(e){toast(e.message,true);}});
+setInterval(()=>{if(state.session.authenticated&&state.page==="programs"&&!document.hidden){loadPrograms();if(state.session.role==="admin")loadActivity();}},15000);
+
 boot();

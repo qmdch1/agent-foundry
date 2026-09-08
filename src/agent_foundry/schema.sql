@@ -58,3 +58,38 @@ CREATE TABLE IF NOT EXISTS agent.web_launches (
     token_hash text NOT NULL, expires_at timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS web_launches_token ON agent.web_launches(token_hash);
+ALTER TABLE agent.programs ADD COLUMN IF NOT EXISTS installed_at timestamptz;
+ALTER TABLE agent.programs ADD COLUMN IF NOT EXISTS last_deployed_at timestamptz;
+ALTER TABLE agent.programs ADD COLUMN IF NOT EXISTS estimated_tokens_saved bigint NOT NULL DEFAULT 0;
+ALTER TABLE agent.programs ADD COLUMN IF NOT EXISTS attributed_llm_tokens bigint NOT NULL DEFAULT 0;
+ALTER TABLE agent.programs ADD COLUMN IF NOT EXISTS savings_sample_count bigint NOT NULL DEFAULT 0;
+UPDATE agent.programs SET installed_at=created_at,last_deployed_at=updated_at
+    WHERE status='ACTIVE' AND installed_at IS NULL;
+CREATE TABLE IF NOT EXISTS agent.catalog (
+    id uuid NOT NULL, name text NOT NULL, description text NOT NULL, version text NOT NULL,
+    runtime text NOT NULL, execution_type text NOT NULL, manifest jsonb NOT NULL,
+    input_schema jsonb NOT NULL, output_schema jsonb NOT NULL, tags text[] NOT NULL, examples jsonb NOT NULL,
+    search_text text NOT NULL, search_vector tsvector, priority integer NOT NULL DEFAULT 0,
+    status text NOT NULL DEFAULT 'PUBLISHED', repository text NOT NULL, repository_path text NOT NULL,
+    git_commit text NOT NULL, source_tree text NOT NULL,
+    published_at timestamptz NOT NULL, discovered_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS catalog_id ON agent.catalog(id);
+CREATE INDEX IF NOT EXISTS catalog_search ON agent.catalog USING gin(search_vector);
+CREATE INDEX IF NOT EXISTS catalog_trigram ON agent.catalog USING gin(search_text gin_trgm_ops);
+CREATE TABLE IF NOT EXISTS agent.catalog_sync (
+    repository text NOT NULL, git_commit text NOT NULL, synced_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS catalog_sync_repository ON agent.catalog_sync(repository);
+CREATE TABLE IF NOT EXISTS agent.request_usage (
+    request_id uuid NOT NULL, prompt_hash text NOT NULL, route text NOT NULL,
+    actual_llm_tokens bigint, baseline_tokens bigint NOT NULL, estimated_tokens_saved bigint,
+    baseline_method text NOT NULL, program_ids jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS request_usage_id ON agent.request_usage(request_id);
+CREATE TABLE IF NOT EXISTS agent.prompt_baselines (
+    prompt_hash text NOT NULL, model text NOT NULL, total_tokens bigint NOT NULL,
+    observed_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS prompt_baselines_lookup ON agent.prompt_baselines(prompt_hash,observed_at DESC);

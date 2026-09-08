@@ -60,6 +60,10 @@ services:
   builder:
     <<: *platform
     command: ["foundry", "worker"]
+    env_file:
+      - .env
+      - path: .worker.env
+        required: false
     volumes:
       - foundry-state:/state
       - tools-checkout:/tools-repository

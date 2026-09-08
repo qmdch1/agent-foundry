@@ -9,7 +9,7 @@ class JobQueue:
     def __init__(self, db, settings):
         self.db, self.settings = db, settings
 
-    async def enqueue(self, kind, fingerprint, payload, delay=0):
+    async def enqueue(self, kind, fingerprint, payload, delay=0, *, dedup_seconds=86400):
         encrypted = encrypt_payload(payload, self.settings.job_encryption_key.get_secret_value())
         async with self.db.pool.connection() as conn:
             await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (kind + fingerprint,))
@@ -17,8 +17,8 @@ class JobQueue:
                 await conn.execute(
                     """SELECT id FROM agent.jobs WHERE kind=%s AND fingerprint=%s
                 AND (status IN ('PENDING','RUNNING') OR
-                     (status IN ('SUCCEEDED','SKIPPED') AND updated_at>now()-interval '1 day')) LIMIT 1""",
-                    (kind, fingerprint),
+                     (status IN ('SUCCEEDED','SKIPPED') AND updated_at>now()-%s*interval '1 second')) LIMIT 1""",
+                    (kind, fingerprint, dedup_seconds),
                 )
             ).fetchone()
             if existing:

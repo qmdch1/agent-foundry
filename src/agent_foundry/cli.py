@@ -46,6 +46,8 @@ async def execute(args):
             case "web-login":
                 token = await container.web_sessions.create_launch()
                 print(args.url.rstrip("/") + "/#connect=" + token)
+            case "catalog-sync":
+                print(json.dumps(await container.catalog.sync()))
             case "reconcile":
                 results = await container.deployment.reconcile()
                 print(json.dumps(results))
@@ -79,7 +81,9 @@ async def execute(args):
                 if args.name not in {"file-reader", "file-writer", "database-query"}:
                     raise PolicyError("This primitive cannot be activated directly")
                 await container.db.execute(
-                    "UPDATE agent.programs SET status='ACTIVE',updated_at=now() WHERE name=%s", (args.name,)
+                    """UPDATE agent.programs SET status='ACTIVE',updated_at=now(),
+                    installed_at=COALESCE(installed_at,now()),last_deployed_at=now() WHERE name=%s""",
+                    (args.name,),
                 )
                 await container.db.event("primitive_enabled", {"name": args.name})
                 print("Administrator-only primitive enabled")
@@ -90,7 +94,7 @@ async def execute(args):
 def main():
     parser = argparse.ArgumentParser(prog="foundry")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("init-env", "migrate", "reconcile"):
+    for name in ("init-env", "migrate", "reconcile", "catalog-sync"):
         commands.add_parser(name)
     worker = commands.add_parser("worker")
     worker.add_argument("--once", action="store_true")

@@ -19,6 +19,8 @@ class Commands:
                 "-c",
                 "credential.helper=",
                 "-c",
+                "credential.useHttpPath=true",
+                "-c",
                 "credential.helper=!python -m agent_foundry.git_credentials",
             ]
         operation_id = hashlib.sha256(os.urandom(32)).hexdigest()[:16]

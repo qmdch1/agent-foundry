@@ -12,6 +12,8 @@ def main():
     remote = urlsplit(os.environ.get("FOUNDRY_TOOL_REPOSITORY", "https://github.com/qmdch1/agent-tools.git"))
     if values.get("protocol") != "https" or values.get("host") != remote.netloc:
         return
+    if values.get("path", "").removesuffix(".git") != remote.path.lstrip("/").removesuffix(".git"):
+        return
     token = os.environ.get("FOUNDRY_GIT_TOKEN", "")
     if token:
         print("username=x-access-token")

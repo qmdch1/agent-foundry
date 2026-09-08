@@ -26,6 +26,7 @@ async def test_builder_git_activation_recovery_and_rollback(container, tmp_path)
         cwd=root,
     )
     await commands.run(["git", "push", "origin", "main"], cwd=root)
+    settings.catalog_enabled = True
     manifest = Manifest(
         name="temperature-converter",
         version="1.0.0",
@@ -67,6 +68,10 @@ async def test_builder_git_activation_recovery_and_rollback(container, tmp_path)
     )
     assert status == "SUCCEEDED" and result["status"] == "ACTIVE"
     original_commit = result["git_commit"]
+    published = await container.db.fetch(
+        "SELECT git_commit FROM agent.catalog WHERE id=%s", (manifest.program_id,)
+    )
+    assert published[0]["git_commit"] == original_commit
     response = await container.service.respond(AgentRequest(prompt="Convert 0 Celsius to Fahrenheit"))
     assert response["route"] == "deterministic" and response["result"] == {"fahrenheit": 32}
 

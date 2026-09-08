@@ -52,6 +52,8 @@ def benefit(evaluation: Evaluation, settings):
 
 
 class Evaluator:
+    catalog = None
+
     def __init__(self, llm, search, queue, settings):
         self.llm, self.search, self.queue, self.settings = llm, search, queue, settings
 
@@ -59,6 +61,10 @@ class Evaluator:
         candidates = await self.search.search(payload["prompt"])
         if candidates and candidates[0].score >= self.settings.duplicate_threshold:
             return "SKIPPED", {"reason": "existing_program", "program_id": str(candidates[0].program_id)}
+        if self.catalog and self.settings.catalog_enabled:
+            reused = await self.catalog.reuse(payload["prompt"], payload.get("request_id"))
+            if reused:
+                return reused
         data = await self.llm.call(
             "evaluator",
             EVALUATOR_SYSTEM,
@@ -91,6 +97,8 @@ class Evaluator:
 
 
 class Builder:
+    catalog = None
+
     def __init__(self, llm, search, registry, deployment, commands, settings):
         self.llm, self.search, self.registry = llm, search, registry
         self.deployment, self.commands, self.settings = deployment, commands, settings
@@ -128,6 +136,16 @@ class Builder:
         (directory / "requirements.txt").write_text("\n".join(requirements) + "\n")
 
     async def build(self, payload):
+        if self.catalog and self.settings.catalog_enabled:
+            local = await self.search.search(payload["capability"])
+            if local:
+                return "SKIPPED", {
+                    "reason": "reuse_or_extension_review",
+                    "candidates": [str(c.program_id) for c in local],
+                }
+            reused = await self.catalog.reuse(payload["capability"], payload.get("request_id"))
+            if reused:
+                return reused
         # Global repository lock serializes builds AND recovery/rollback; semantic duplicate check is inside it.
         async with self.registry.db.lock("tool-repository-deployment"):
             candidates = await self.search.search(payload["capability"])
@@ -181,6 +199,15 @@ class Builder:
             )
             if duplicates or same_name:
                 return "SKIPPED", {"reason": "duplicate_at_publication"}
+            if self.catalog and self.settings.catalog_enabled:
+                # Another platform may have published the capability while our model was generating it.
+                await self.catalog.sync()
+                published = await self.catalog.search.search(manifest.description)
+                named = await self.registry.db.fetch(
+                    "SELECT id FROM agent.catalog WHERE name=%s", (manifest.name,)
+                )
+                if published or named:
+                    return "SKIPPED", {"reason": "published_during_build"}
             root = self.settings.tool_repository_root.resolve()
             if not (root / ".git").exists():
                 await self.commands.run(
@@ -245,6 +272,8 @@ class Builder:
                 self.settings.tool_repository, commit, f"tools/{manifest.name}"
             )
             await self.deployment.deploy(manifest, released, commit)
+            if self.catalog and self.settings.catalog_enabled:
+                await self.catalog.sync()
             return "SUCCEEDED", {
                 "program_id": str(manifest.program_id),
                 "version": manifest.version,

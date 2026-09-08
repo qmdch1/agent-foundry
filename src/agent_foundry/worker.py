@@ -1,11 +1,13 @@
 import asyncio
 import contextlib
+import time
 
 
 class Worker:
-    def __init__(self, queue, evaluator, builder, deployment, settings):
+    def __init__(self, queue, evaluator, builder, deployment, settings, catalog=None):
         self.queue, self.evaluator, self.builder = queue, evaluator, builder
         self.deployment, self.settings = deployment, settings
+        self.catalog = catalog
 
     async def process(self, job):
         async def dispatch():
@@ -14,6 +16,13 @@ class Worker:
                 return await self.evaluator.evaluate(payload)
             if job["kind"] == "BUILD":
                 return await self.builder.build(payload)
+            if job["kind"] == "INSTALL":
+                return await self.catalog.install(payload["references"])
+            if job["kind"] == "CATALOG_SYNC":
+                return "SUCCEEDED", await self.catalog.sync()
+            if job["kind"] == "DISCOVER":
+                reused = await self.catalog.reuse(payload["prompt"], payload.get("request_id"))
+                return reused or ("SKIPPED", {"reason": "no_published_match_build_disabled"})
             if job["kind"] == "RECONCILE":
                 results = await self.deployment.reconcile()
                 return ("SUCCEEDED" if all(r["success"] for r in results) else "FAILED"), {
@@ -45,7 +54,14 @@ class Worker:
                     await task
 
     async def run(self, once=False):
+        next_sync = 0
         while True:
+            if self.catalog and self.settings.catalog_enabled and time.monotonic() >= next_sync:
+                try:
+                    await self.catalog.sync()
+                except Exception as exc:
+                    await self.queue.db.event("catalog_sync_failed", {"error": type(exc).__name__})
+                next_sync = time.monotonic() + self.settings.catalog_sync_seconds
             job = await self.queue.claim()
             if job:
                 await self.process(job)

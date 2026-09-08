@@ -59,31 +59,30 @@ class Registry:
             ).fetchall()
             if len(old) > 1:
                 raise PolicyError("Duplicate registry identity")
-            # Preserve accumulated statistics across upgrades and rollback.
-            await conn.execute("DELETE FROM agent.programs WHERE id=%s", (manifest.program_id,))
-            await conn.execute(
-                """INSERT INTO agent.programs
-                (id,name,description,version,program_type,runtime,execution_type,endpoint,method,entrypoint,
-                 repository,repository_path,git_commit,input_schema,output_schema,selection_rules,tags,
-                 examples,status,manifest,search_text,search_vector)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                        to_tsvector('simple',%s))""",
-                values,
-            )
+            # Keep the row identity stable so concurrent executions cannot lose counter updates.
             if old:
-                o = old[0]
                 await conn.execute(
-                    """UPDATE agent.programs SET usage_count=%s,success_count=%s,
-                    failure_count=%s,avg_latency_ms=%s,created_at=%s,last_used_at=%s WHERE id=%s""",
-                    (
-                        o["usage_count"],
-                        o["success_count"],
-                        o["failure_count"],
-                        o["avg_latency_ms"],
-                        o["created_at"],
-                        o["last_used_at"],
-                        manifest.program_id,
-                    ),
+                    """UPDATE agent.programs SET name=%s,description=%s,version=%s,
+                    program_type=%s,runtime=%s,execution_type=%s,endpoint=%s,method=%s,entrypoint=%s,
+                    repository=%s,repository_path=%s,git_commit=%s,input_schema=%s,output_schema=%s,
+                    selection_rules=%s,tags=%s,examples=%s,status=%s,manifest=%s,search_text=%s,
+                    search_vector=to_tsvector('simple',%s),updated_at=now() WHERE id=%s""",
+                    (*values[1:], manifest.program_id),
+                )
+            else:
+                await conn.execute(
+                    """INSERT INTO agent.programs
+                    (id,name,description,version,program_type,runtime,execution_type,endpoint,method,entrypoint,
+                     repository,repository_path,git_commit,input_schema,output_schema,selection_rules,tags,
+                     examples,status,manifest,search_text,search_vector)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                            to_tsvector('simple',%s))""",
+                    values,
+                )
+            if status == "ACTIVE":
+                await conn.execute(
+                    "UPDATE agent.programs SET installed_at=COALESCE(installed_at,now()),last_deployed_at=now() WHERE id=%s",
+                    (manifest.program_id,),
                 )
             if status == "ACTIVE" and commit:
                 await conn.execute(
@@ -118,7 +117,8 @@ class Registry:
 
     async def health_report(self):
         return await self.db.fetch("""SELECT id,name,version,git_commit,status,usage_count,success_count,
-            failure_count,avg_latency_ms,last_used_at,
+            failure_count,avg_latency_ms,last_used_at,description,installed_at,last_deployed_at,
+            estimated_tokens_saved,attributed_llm_tokens,savings_sample_count,
             CASE WHEN usage_count=0 THEN 'unused'
                  WHEN failure_count::float/usage_count > 0.2 THEN 'high_failure_rate'
                  ELSE 'observing' END AS observation

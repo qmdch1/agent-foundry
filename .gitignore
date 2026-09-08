@@ -1,4 +1,5 @@
 .env
+.worker.env
 .env.*
 !.env.example
 .venv/

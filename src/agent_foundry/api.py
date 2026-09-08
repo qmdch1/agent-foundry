@@ -100,10 +100,11 @@ def create_app(settings=None, container=None):
             ) from None
 
     @app.get("/v1/programs/search", dependencies=[Depends(user_auth)])
-    async def search(q: str):
-        if not q.strip() or len(q) > settings.max_prompt_chars:
+    async def search(q: str, source: str = "installed"):
+        if not q.strip() or len(q) > settings.max_prompt_chars or source not in {"installed", "github"}:
             raise HTTPException(422, "Invalid query length")
-        return [c.model_dump(mode="json") for c in await services.search.search(q)]
+        searcher = services.catalog.search if source == "github" else services.search
+        return [c.model_dump(mode="json") for c in await searcher.search(q)]
 
     @app.get("/admin/jobs/{job_id}", dependencies=[Depends(admin_auth)])
     async def job(job_id: UUID):

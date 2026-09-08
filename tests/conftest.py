@@ -25,6 +25,7 @@ def settings(tmp_path):
         evaluator_model="test-evaluator",
         builder_model="test-builder",
         evaluation_delay_seconds=0,
+        catalog_enabled=False,
     )
 
 
@@ -50,6 +51,10 @@ async def container(settings):
         "console_settings",
         "web_sessions",
         "web_launches",
+        "catalog",
+        "catalog_sync",
+        "request_usage",
+        "prompt_baselines",
     ):
         await app.db.execute(f"DELETE FROM agent.{table}")
     await seed(app.registry)

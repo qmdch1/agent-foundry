@@ -32,17 +32,20 @@ def map_input(prompt: str, manifest: Manifest):
 
 
 class ProgramSearch:
-    def __init__(self, db, settings):
+    def __init__(self, db, settings, *, catalog=False):
         self.db, self.settings = db, settings
+        self.catalog = catalog
 
     async def search(self, prompt, *, include_disabled=False):
         # Indexed FTS + trigram prefilter; exact examples include multilingual and arithmetic requests.
+        table = "agent.catalog" if self.catalog else "agent.programs"
+        status = "PUBLISHED" if self.catalog else "ACTIVE"
         rows = await self.db.fetch(
-            """WITH q AS (SELECT plainto_tsquery('simple',%s) AS tsq)
+            f"""WITH q AS (SELECT plainto_tsquery('simple',%s) AS tsq)
             SELECT p.*, LEAST(1.0, GREATEST(similarity(search_text,%s),
                 ts_rank_cd(search_vector,q.tsq)/(1+ts_rank_cd(search_vector,q.tsq)))) AS rank
-            FROM agent.programs p,q
-            WHERE (status='ACTIVE' OR (%s AND status='DISABLED'))
+            FROM {table} p,q
+            WHERE (status='{status}' OR (%s AND status='DISABLED'))
               AND manifest->>'visibility'='public'
               AND (search_vector @@ q.tsq OR search_text %% %s
                    OR EXISTS (SELECT 1 FROM jsonb_array_elements(examples) e

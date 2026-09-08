@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     queue_poll_seconds: float = Field(1, ge=0.1, le=60)
     evaluation_delay_seconds: float = Field(2, ge=0, le=60)
     builder_enabled: bool = True
+    catalog_enabled: bool = True
+    catalog_sync_seconds: int = Field(60, ge=10, le=86400)
+    catalog_max_programs: int = Field(10000, ge=1, le=100000)
+    token_estimate_bytes_per_token: float = Field(4, ge=1, le=10)
+    token_estimate_overhead: int = Field(100, ge=0, le=10000)
     creation_threshold: float = Field(0.65, ge=0, le=1)
     evaluation_weights: dict[str, float] = {
         "reuse_score": 0.20,
