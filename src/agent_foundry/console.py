@@ -135,7 +135,7 @@ def console_router(services):
             c.discovered_at,'public' AS visibility,c.status,
             (c.manifest->>'requires_db')::boolean AS requires_db,
             COALESCE(p.usage_count,0) AS usage_count,COALESCE(p.avg_latency_ms,0) AS avg_latency_ms,
-            p.installed_at,p.estimated_tokens_saved,p.status AS local_status,'github' AS source
+            p.installed_at,p.last_deployed_at,p.estimated_tokens_saved,p.status AS local_status,'github' AS source
             FROM agent.catalog c LEFT JOIN agent.programs p ON p.id=c.id
             WHERE c.name ILIKE %s OR c.description ILIKE %s ORDER BY c.name LIMIT 50 OFFSET %s""",
             (*params, offset),
