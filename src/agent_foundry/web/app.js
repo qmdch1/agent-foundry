@@ -33,7 +33,7 @@ const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const names = {calculator:"정확한 계산", "csv-statistics":"CSV 통계", "file-reader":"파일 읽기", "file-writer":"파일 쓰기", "database-query":"데이터베이스 조회", "http-api-caller":"HTTP API 연결", "web-search-adapter":"웹 검색", "python-executor":"Python 실행", "builder-internal":"프로그램 Builder"};
 const toolIcon = (p) => p.name === "calculator" ? "calculator" : p.name.includes("csv") ? "chart" : p.name.includes("file") ? "file" : p.name.includes("database") ? "database" : p.runtime === "python" ? "code" : p.name.includes("search") ? "search" : "link";
-const state = {session:{authenticated:false}, page:"prompt", overview:null, programs:[], settings:null, provider:"openai", providers:[], connectionAttempt:0, source:"installed", filter:"all", query:"", offset:0, total:0, responses:[], busy:false, dirty:false, libraryRequest:0};
+const state = {session:{authenticated:false}, page:"prompt", overview:null, programs:[], settings:null, provider:"openai", providers:[], connectionAttempt:0, source:"installed", filter:"ACTIVE", query:"", offset:0, total:0, responses:[], busy:false, dirty:false, libraryRequest:0};
 const emptyResponse = '<div class="empty-result"><span class="empty-icon">'+icon("message")+'</span><strong>결과가 여기에 표시됩니다</strong><p>프로그램 실행 결과와 AI 답변을 함께 확인하세요.</p></div>';
 function hydrateIcons(root=document){ root.querySelectorAll("[data-icon]").forEach(el => {el.innerHTML=icon(el.dataset.icon);}); }
 function toast(message, error=false){ const el=document.createElement("div");el.className="toast"+(error?" error":"");el.textContent=message;$("#toast-region").append(el);setTimeout(()=>el.remove(),5000); }
@@ -118,6 +118,9 @@ async function refresh(){
 const dateLabel=value=>value?new Date(value).toLocaleDateString("ko-KR"):"아직 설치되지 않음";
 function badge(p){if(p.source==="github")return `<span class="badge ${p.local_status==="ACTIVE"?"active":"shared"}">${p.local_status==="ACTIVE"?"이 서버에 설치됨":"GitHub 공유"}</span>`;return p.visibility==="internal"?'<span class="badge internal">내부 기능</span>':p.status==="ACTIVE"?'<span class="badge active">사용 가능</span>':'<span class="badge disabled">설정 대기</span>';}
 async function loadPrograms(){
+  $("#status-filters").hidden=state.source==="github";
+  $$("[data-filter]").forEach(b=>{const selected=state.source==="installed"&&b.dataset.filter===state.filter;b.classList.toggle("active",selected);b.setAttribute("aria-pressed",String(selected));});
+  $$("[data-source]").forEach(b=>{const selected=b.dataset.source===state.source;b.classList.toggle("active",selected);b.setAttribute("aria-pressed",String(selected));});
   if(!state.session.authenticated){$("#program-grid").innerHTML='<div class="empty-library">'+icon("lock")+'<strong>워크스페이스 연결이 필요합니다</strong><p>연결하면 등록된 프로그램을 확인할 수 있습니다.</p><button class="button secondary" data-login>연결하기</button></div>';return;}
   const sequence=++state.libraryRequest;
   $("#program-grid").innerHTML='<div class="loading-panel"><span class="spinner"></span>프로그램을 가져오고 있습니다</div>';
@@ -232,8 +235,8 @@ document.addEventListener("click",async event=>{
   if(button.dataset.close)$("#"+button.dataset.close).close();
   if(button.dataset.program)programDetail(button.dataset.program);
   if(button.dataset.example)fillPrompt(button.dataset.example);
-  if(button.dataset.filter){state.filter=button.dataset.filter;state.offset=0;$$("[data-filter]").forEach(b=>b.classList.toggle("active",b===button));loadPrograms();}
-  if(button.dataset.source){state.source=button.dataset.source;state.offset=0;$("#status-filters").hidden=state.source==="github";$$ ("[data-source]").forEach(b=>b.classList.toggle("active",b===button));loadPrograms();}
+  if(button.dataset.filter){state.filter=button.dataset.filter;if(button.hasAttribute("data-summary"))state.source="installed";state.offset=0;loadPrograms();}
+  if(button.dataset.source){state.source=button.dataset.source;state.offset=0;loadPrograms();}
   if(button.dataset.install){button.disabled=true;try{const result=await api(`/ui/catalog/${button.dataset.install}/install`,{method:"POST"});toast("설치를 요청했습니다. 별도 에이전트가 처리합니다.");watchJob(result.job_id);if($("#program-dialog").open)$("#program-dialog").close();}catch(e){toast(e.message,true);}finally{button.disabled=false;}}
   if(button.dataset.provider){setProvider(button.dataset.provider,true);markDirty();}
   if(button.dataset.copy!==undefined){const r=state.responses[Number(button.dataset.copy)];try{await navigator.clipboard.writeText(r.answer||JSON.stringify(r.result,null,2));toast("결과를 복사했습니다.");}catch{toast("복사할 수 없습니다. 결과를 직접 선택해 복사해주세요.",true);}}
