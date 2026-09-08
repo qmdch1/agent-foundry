@@ -11,9 +11,11 @@ from agent_foundry.usage import UsageAccounting
 
 
 @pytest.mark.parametrize("values,expected", [([120, 80], 200), ([120, None], None), ([0], 0), ([], None)])
-async def test_build_usage_retry_totals_and_unknown(container, tmp_path, values, expected):
+@pytest.mark.parametrize("estimated", [False, True])
+async def test_build_usage_retry_totals_and_unknown(container, tmp_path, values, expected, estimated):
     build_id = uuid4()
     manifest = seed_manifests()[0]
+    manifest.generation_tokens_estimated = estimated
     commit = "a" * 40
     await container.registry.register(manifest, status="ACTIVE", commit=commit)
     for i, value in enumerate(values):
@@ -39,6 +41,10 @@ async def test_build_usage_retry_totals_and_unknown(container, tmp_path, values,
     ) as client:
         rows = (await client.get("/ui/programs")).json()["items"]
         assert next(p for p in rows if p["id"] == str(manifest.program_id))["creation_tokens"] == expected
+        assert (
+            next(p for p in rows if p["id"] == str(manifest.program_id))["creation_tokens_estimated"]
+            is estimated
+        )
         await container.registry.register(manifest, status="ACTIVE", commit="b" * 40)
         rows = (await client.get("/ui/programs")).json()["items"]
         assert next(p for p in rows if p["id"] == str(manifest.program_id))["creation_tokens"] is None

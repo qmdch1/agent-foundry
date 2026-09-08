@@ -76,6 +76,7 @@ class Manifest(StrictModel):
     secret_name: str | None = Field(None, pattern=r"^[A-Z][A-Z0-9_]{0,99}$")
     visibility: Literal["public", "admin", "internal"] = "public"
     side_effects: bool = False
+    generation_tokens_estimated: bool = False
 
     @field_validator("input_schema", "output_schema")
     @classmethod

@@ -197,6 +197,7 @@ class Builder:
                         request_id=build_id,
                     )
                     bundle = Bundle.model_validate(data)
+                    bundle.manifest.generation_tokens_estimated = False
                     self.write_bundle(bundle, attempt_dir)
                     image = await self.deployment.sandbox.build(attempt_dir, bundle.manifest)
                     await self.deployment.sandbox.validate(image, bundle.manifest)

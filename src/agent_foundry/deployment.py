@@ -106,7 +106,9 @@ class Deployment:
                         row["repository"], row["git_commit"], row["repository_path"]
                     )
                     manifest = Manifest.model_validate_json((directory / "manifest.json").read_text())
-                    if manifest.model_dump(mode="json") != row["manifest"]:
+                    if manifest.model_dump(mode="json") != Manifest.model_validate(
+                        row["manifest"]
+                    ).model_dump(mode="json"):
                         raise PolicyError("Git manifest and Registry differ")
                     await self.deploy(manifest, directory, row["git_commit"], activate=False)
                     results.append({"program_id": str(row["id"]), "success": True})
@@ -126,7 +128,9 @@ class Deployment:
             row = rows[0]
             directory = await self.checkout(row["repository"], commit, row["repository_path"])
             manifest = Manifest.model_validate_json((directory / "manifest.json").read_text())
-            if manifest.model_dump(mode="json") != row["manifest"]:
+            if manifest.model_dump(mode="json") != Manifest.model_validate(row["manifest"]).model_dump(
+                mode="json"
+            ):
                 raise PolicyError("Rollback manifest differs from stable release")
             receipt = await self.deploy(manifest, directory, commit)
             await self.registry.db.event("rollback", {"program_id": str(program_id), "git_commit": commit})
