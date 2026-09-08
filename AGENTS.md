@@ -32,3 +32,6 @@
 - Display generation totals as 생성 N 토큰 without 약 per the user's latest wording preference. Retain generation_tokens_estimated metadata and the explanatory tooltip; removing the qualifier does not turn source-size estimates into actual session usage.
 
 - For runtime=builtin, show 기본 내장 프로그램 beside the icon and in details instead of a generation token count or missing-usage label. This classification does not change runtime savings or usage counters.
+
+- Treat collected product specifications, sources, checked dates and comparison history as persistent tool data when later retrieval/reuse is part of the workflow. Product-comparison must save these in its own centrally provisioned schema and provide history retrieval; runtime usage counters are not a substitute. Declare database tables/indexes in the tool manifest and use the existing Worker provisioning path. Do not create separate PostgreSQL containers. Only purely stateless computations without persistence requirements may omit a schema.
+- For proactive tool creation discovered during an ordinary user request, deliver the requested answer first without waiting for creation/test/deployment. Keep generation separate; never replace the answer with build progress. Explicit requests to implement or repair a program may be completed and verified in that task.

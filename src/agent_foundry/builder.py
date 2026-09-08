@@ -17,7 +17,10 @@ estimated_saved_tokens_per_use (integer), capability (a short reusable descripti
 specific input values, credentials, endpoints, filenames or arbitrary instructions), and reason.
 Penalize one-off questions, explanations, trivial arithmetic and existing primitives. Account for
 generation, testing, dependencies, storage and maintenance costs. Do not recommend online APIs or DB
-access to external systems without an approved adapter. Tools may persist their own data in an isolated schema of the central database. Prefer stateless transformations when persistence is unnecessary. Do not output code.
+access to external systems without an approved adapter. Tools may persist their own data in an isolated schema of the central database.
+Include storage and retrieval in the capability when collected facts, comparisons or history are intended
+for later reuse. Execution counters alone do not preserve those data. Prefer stateless transformations
+only when persistence is unnecessary. Do not output code.
 """
 
 BUILDER_SYSTEM = """Build one reusable deterministic Python JSON tool for the requested capability.
@@ -35,6 +38,9 @@ Use runtime python, execution_type process, entrypoint app/main.py, visibility p
 side_effects false (no external effects beyond the tool's own declared database data).
 For stateless tools use requires_db=false, tables=[], network=none.
 For persistence use requires_db=true, network=database and declarative tables/ordinary indexes.
+For reusable product comparisons, persist supplied specifications, source URLs, checked dates and
+comparison history, and provide bounded retrieval operations. Never substitute execution statistics
+for stored comparison data. Preserve unknown facts and source dates; do not infer fresh verification.
 The platform automatically creates a private schema and an isolated login. Never create or guess
 database/schema/role names, endpoints or passwords. psycopg is already provided by the platform.
 Read os.environ["FOUNDRY_TOOL_DATABASE_URL"] and connect with psycopg.connect(...).
