@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import os
 import tarfile
 from pathlib import Path
 from uuid import uuid4
@@ -21,6 +22,8 @@ print(json.dumps(result, allow_nan=False))
 
 
 class Sandbox:
+    databases = None
+
     def __init__(self, commands, settings):
         self.commands, self.settings = commands, settings
 
@@ -85,11 +88,26 @@ class Sandbox:
         )
         return image.decode().strip()
 
-    async def run(self, image, manifest, data=None, command=None):
+    async def run(self, image, manifest, data=None, command=None, *, database_env=None):
         if not image.startswith("sha256:"):
             raise PolicyError("Runtime requires an immutable image ID")
         name = "foundry-run-" + uuid4().hex
         limits = manifest.limits
+        network = "none"
+        if database_env:
+            if not manifest.requires_db or set(database_env) != {
+                "FOUNDRY_TOOL_DATABASE_URL",
+                "FOUNDRY_TOOL_SCHEMA",
+            }:
+                raise PolicyError("Database runtime requires an explicit managed binding")
+            network = self.settings.tool_database_network
+            internal = await self.commands.run(
+                [self.settings.docker_binary, "network", "inspect", network, "--format", "{{.Internal}}"]
+            )
+            if internal.decode().strip() != "true":
+                raise PolicyError("Database tools require an internal Docker network")
+        elif manifest.requires_db and not command:
+            raise PolicyError("Database tool has no runtime binding")
         argv = [
             self.settings.docker_binary,
             "run",
@@ -102,7 +120,7 @@ class Sandbox:
             "10001:10001",
             "--read-only",
             "--network",
-            "none",
+            network,
             "--cap-drop",
             "ALL",
             "--security-opt",
@@ -120,15 +138,23 @@ class Sandbox:
             "--tmpfs",
             "/tmp:rw,noexec,nosuid,size=64m,mode=1777",
         ]
+        if database_env:
+            # Docker reads these values from its client environment, never argv or audit logs.
+            argv += ["--env", "FOUNDRY_TOOL_DATABASE_URL", "--env", "FOUNDRY_TOOL_SCHEMA"]
         if command:
             argv += ["--entrypoint", command[0], image, *command[1:]]
         else:
             argv.append(image)
+        runtime_env = {**os.environ, **database_env} if database_env else None
+        if runtime_env and os.name == "posix" and self.settings.docker_binary.endswith(".exe"):
+            # WSL only forwards named WSLENV entries to the Windows Docker client.
+            runtime_env["WSLENV"] = ":".join(filter(None, [runtime_env.get("WSLENV", ""), *database_env]))
         try:
             return await self.commands.run(
                 argv,
                 stdin=json.dumps(data or {}).encode(),
                 timeout=min(limits.timeout_seconds, self.settings.execution_timeout),
+                env=runtime_env,
             )
         finally:
             # Client timeout does not stop a daemon-side container; explicitly reap it.
@@ -145,28 +171,38 @@ class Sandbox:
             manifest,
             command=["python", "-X", "pycache_prefix=/tmp/pycache", "-m", "py_compile", "app/main.py"],
         )
-        output = await self.run(
-            image,
-            manifest,
-            command=[
-                "python",
-                "-m",
-                "pytest",
-                "-q",
-                "-p",
-                "no:cacheprovider",
-                "--basetemp=/tmp/pytest",
-                "tests",
-            ],
-        )
+        test_command = [
+            "python",
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "--basetemp=/tmp/pytest",
+            "tests",
+        ]
+        if manifest.requires_db:
+            if not self.databases:
+                raise PolicyError("Central database manager is not configured")
+            async with self.databases.test_scope(manifest) as env:
+                output = await self.run(image, manifest, command=test_command, database_env=env)
+        else:
+            output = await self.run(image, manifest, command=test_command)
         for example in manifest.examples:
-            raw = await self.run(image, manifest, example.input)
+
+            async def sample():
+                if manifest.requires_db:
+                    async with self.databases.test_scope(manifest) as env:
+                        return await self.run(image, manifest, example.input, database_env=env)
+                return await self.run(image, manifest, example.input)
+
+            raw = await sample()
             result = json.loads(raw)
             validate_json(result, manifest.output_schema)
             if result != example.output:
                 raise PolicyError("Sample output differs from expected output")
             # Independent repeated execution catches common nondeterministic tools.
-            if json.loads(await self.run(image, manifest, example.input)) != result:
+            if json.loads(await sample()) != result:
                 raise PolicyError("Sample output is not deterministic")
         return {
             "passed": True,
@@ -177,4 +213,5 @@ class Sandbox:
             "output_schema": True,
             "repeated_execution": True,
             "health": "CLI samples passed",
+            "database_test_isolation": manifest.requires_db,
         }

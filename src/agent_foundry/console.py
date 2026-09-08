@@ -103,8 +103,12 @@ def console_router(services):
             """SELECT id,name,description,version,runtime,execution_type,status,tags,
             usage_count,success_count,failure_count,avg_latency_ms,last_used_at,git_commit,
             installed_at,last_deployed_at,estimated_tokens_saved,attributed_llm_tokens,savings_sample_count,
-            manifest->>'visibility' AS visibility,examples,input_schema,output_schema
-            FROM agent.programs """
+            manifest->>'visibility' AS visibility,examples,input_schema,output_schema,
+            (manifest->>'requires_db')::boolean AS requires_db,
+            (SELECT jsonb_build_object('connection_name',d.connection_name,'schema_name',d.schema_name,
+                'status',d.status,'created_at',d.created_at)
+                FROM agent.program_databases d WHERE d.program_id=p.id LIMIT 1) AS database
+            FROM agent.programs p """
             + condition
             + " ORDER BY (status='ACTIVE') DESC,name LIMIT 50 OFFSET %s",
             (*params, offset),
@@ -121,6 +125,7 @@ def console_router(services):
             """SELECT c.id,c.name,c.description,c.version,c.runtime,c.execution_type,
             c.tags,c.examples,c.input_schema,c.output_schema,c.git_commit,c.published_at,
             c.discovered_at,'public' AS visibility,c.status,
+            (c.manifest->>'requires_db')::boolean AS requires_db,
             COALESCE(p.usage_count,0) AS usage_count,COALESCE(p.avg_latency_ms,0) AS avg_latency_ms,
             p.installed_at,p.estimated_tokens_saved,p.status AS local_status,'github' AS source
             FROM agent.catalog c LEFT JOIN agent.programs p ON p.id=c.id

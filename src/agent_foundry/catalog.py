@@ -96,8 +96,8 @@ class Catalog:
                         .strip()
                         .splitlines()
                     )
-                # Automatic imports use the same offline, public, non-destructive policy as generated tools.
-                if m.runtime != "python" or m.visibility != "public" or m.side_effects or m.requires_db:
+                # Automatic imports use the same isolated, public, non-destructive policy as generated tools.
+                if m.runtime != "python" or m.visibility != "public" or m.side_effects:
                     continue
                 text = " ".join([m.name, m.description, *m.tags, *(e.prompt for e in m.examples)]).lower()
                 rows.append(
@@ -188,7 +188,6 @@ class Catalog:
                     or manifest.runtime != "python"
                     or manifest.visibility != "public"
                     or manifest.side_effects
-                    or manifest.requires_db
                 ):
                     raise PolicyError("Published program is outside automatic installation policy")
                 await self.deployment.deploy(manifest, directory, ref["git_commit"])

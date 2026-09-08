@@ -256,13 +256,15 @@ uv run foundry deploy tools/csv-statistics <40-character-agent-tools-commit>
 
 ## 자동 생성 범위와 비용
 
-현재 자동 생성 대상은 **상태 없는 오프라인 Python 데이터 처리 도구**입니다. 임의 웹서비스,
-Go daemon, 네트워크가 필요한 생성 코드, 생성 코드의 직접 DB 접속은 자동 승인하지 않습니다.
-네트워크 처리는 관리자가 등록한 HTTP/DB adapter로 제공합니다. 생성 파일은 app Python,
+현재 자동 생성 대상은 **Python 데이터 처리 도구와 자체 데이터를 중앙 DB에 저장하는 도구**입니다.
+DB가 필요한 도구는 `requires_db=true`, `network=database`, 선언적 `tables`를 지정합니다.
+별도 Worker가 프로그램 전용 스키마·계정을 만들고 실행 시 연결 정보를 주입합니다.
+외부 시스템 접근은 관리자가 등록한 HTTP/DB adapter로 제공합니다. 생성 파일은 app Python,
 tests Python, README로 제한하며 manifest와 requirements는 검증된 구조에서 저장합니다.
 모델이 Dockerfile, Compose, shell 또는 SQL을 만들어 제어 계층에서 실행하게 하지 않습니다.
 
-네트워크 없음, read-only root, non-root, CPU/RAM/PID 제한, timeout, 출력 크기 제한을 적용합니다.
+일반 도구는 네트워크를 차단합니다. DB 도구만 중앙 PostgreSQL에 연결된 내부 Docker 네트워크를
+사용합니다. 모든 도구에 read-only root, non-root, CPU/RAM/PID 제한, timeout, 출력 크기 제한을 적용합니다.
 CLI timeout 때 Docker 컨테이너도 명시적으로 제거합니다. 기본 의존성은 표준 라이브러리이며
 외부 패키지는 관리자가 승인한 `package==version -> wheel SHA256`만 설치합니다. 설치는
 binary wheel, no-deps, require-hashes로 제한하고 생성 코드를 빌드 중 실행하지 않습니다.
@@ -295,13 +297,47 @@ Git으로 복구되지 않으므로 별도의 DB/파일 백업이 필요합니�
 Push 실패로 로컬 commit만 남으면 활성화하지 않습니다. Git 문제를 해결해 해당 commit을 push한 뒤
 `foundry deploy tools/<name> <commit>`으로 재개할 수 있습니다. 기존 dirty checkout은 거부합니다.
 
-Tool 데이터 구조가 필요할 때 사용할 공용 PostgreSQL의 `tool_<program UUID>` schema와 선언적
-테이블/인덱스 migration 인터페이스가 있습니다. 기존 타입 변경이나 파괴적 SQL을 거부하며
-additive migration만 트랜잭션으로 적용합니다. PK/FK/UNIQUE를 생성하지 않습니다. 생성 Tool의
-자동 DB 접근은 별도 승인 adapter 확장 전까지 비활성입니다. DB DROP/TRUNCATE 등을 실행하는
-범용 privileged-command API는 제공하지 않습니다. 감사 로그는 허용된 Git/Docker/migration
-명령의 시작·종료와 결과를 남깁니다. 데이터 삭제나 비호환 migration은 백업·복구 계획을 갖춘
-별도 관리 절차가 필요합니다.
+### 중앙 DB와 프로그램별 스키마
+
+PostgreSQL 하나의 전용 Foundry DB를 공유합니다. 메인 관리 정보는 `agent` 스키마에,
+각 DB 사용 프로그램의 테이블은 `tool_<program UUID hex>` 스키마에 저장합니다.
+DB를 사용하지 않는 계산·통계 도구에는 빈 스키마를 만들지 않습니다.
+
+설치 Worker는 임시 스키마에서 테스트 → 운영 스키마/계정 생성 → 추가형 migration →
+실제 계정 연결 확인 → ACTIVE 등록을 수행합니다. `agent.program_databases`에 프로그램 ID,
+중앙 연결 참조, 스키마/계정, secret 참조, 상태와 생성일을 보관합니다. 비밀번호는 기존
+`FOUNDRY_JOB_ENCRYPTION_KEY`로 암호화하며 Git·manifest·로그·웹 응답에 노출하지 않습니다.
+프로그램 상세 화면에서 중앙 DB 연결 여부와 스키마를 확인할 수 있습니다.
+
+각 실행 계정은 자기 스키마의 테이블에만 조회·삽입·수정·삭제 권한을 갖습니다. 다른 프로그램과
+`agent` 스키마 접근, 테이블 생성/삭제, TRUNCATE, 임시 테이블 생성, 권한 승격은 허용하지 않습니다.
+전용 Foundry DB에서 PUBLIC의 CREATE/TEMP와 agent/public 스키마 접근을 회수합니다.
+이미 다른 시스템이 사용하는 DB에 이 플랫폼을 합치지 마십시오. Worker의 DB 관리 계정에는
+스키마·역할 생성/권한 부여 권한이 필요합니다. 생성 도구에는 관리 계정 정보를 전달하지 않습니다.
+
+생성 Python은 플랫폼에 포함된 `psycopg`로 `FOUNDRY_TOOL_DATABASE_URL` 환경변수에 연결합니다.
+테이블 이름은 스키마 없이 사용하고 입력 값은 SQL 매개변수로 전달합니다.
+`FOUNDRY_TOOL_SCHEMA`도 제공하지만 모델이 스키마명·주소·비밀번호를 결정하지 않습니다.
+정의는 manifest의 `tables`와 자동 작성된 `migrations/001_tables.json`으로 Git에 저장합니다.
+테이블/열 추가와 일반 인덱스만 지원하며 키 제약, 기존 타입 변경, 파괴적 SQL은 생성하지 않습니다.
+
+단위 테스트는 임시 스키마 하나를 공유하며, 각 예시와 반복 검사는 각각 빈 임시 스키마에서
+실행합니다. 운영 데이터는 테스트에 사용하지 않습니다. 테스트가 끝나면 플랫폼이 기록한
+정확한 임시 스키마/계정만 제거합니다. Worker 장애로 남은 테스트 범위는 2시간 후 회수합니다.
+설치·업데이트·롤백은 같은 운영 스키마와 데이터를 유지합니다. 파괴적 데이터 변경은 백업과
+복구 계획을 갖춘 별도 관리 절차가 필요하며 범용 DB DROP/TRUNCATE API는 제공하지 않습니다.
+
+`FOUNDRY_TOOL_DATABASE_NETWORK/HOST/PORT`로 내부 Docker 연결을 설정합니다.
+기본 동시 연결 제한은 계정당 2개, 기본 SQL 제한 시간은 5초, lock 대기 제한은 1초입니다.
+시간 제한은 PostgreSQL 세션 기본값이며 생성 코드가 바꿀 수 있는 값이므로 강제 DB 자원 격리를
+대신하지 않습니다. 전용 네트워크에는 DB 외 서비스나 Docker socket을 연결하지 마십시오.
+
+다른 메인 서버는 Git의 같은 도구를 검색·설치하면 자신의 중앙 DB에 같은 프로그램 스키마를
+새로 만듭니다. **운영 데이터는 Git으로 전달되지 않습니다.** 기존 서버를 복구할 때는 전용
+DB 백업과 암호화 키를 함께 복원하고, DB 이름을 유지한 상태에서 reconcile을 실행합니다.
+역할을 별도로 복원하지 않는 경우 데이터베이스 복원에 `--no-owner --no-acl`을 적용하고
+Foundry 관리 계정으로 복원한 다음 reconcile로 프로그램별 권한을 재설정합니다.
+관리 역할이 복원되지 않아도 등록된 암호화 연결 정보로 다시 생성합니다.
 
 ## 검증과 운영 한계
 

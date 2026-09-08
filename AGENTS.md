@@ -16,3 +16,7 @@
 - Use PostgreSQL durable leased jobs and ordinary indexes. Do not generate key constraints. Serialize logical identity changes with advisory locks.
 - Keep secrets and runtime data out of Git. Record source revisions and sanitized processing evidence. Reconcile and rollback from pinned commits.
 - Verify changes with `uv run pytest`, `uv run ruff check .`, and Compose configuration validation. Integration tests use an isolated PostgreSQL database, never existing project databases.
+
+- Use the main platform's single central PostgreSQL database. Every installed DB-using program receives its own managed `tool_<program UUID hex>` schema and least-privilege role; stateless programs need no empty schema. Store the binding, encrypted credential reference, dates and status in main metadata. Never provision one database container per tool.
+- The separate Worker owns schema provisioning, additive migrations, disposable test schemas, health checks and deployment. Generated Python may use the injected central database connection for its own declared tables; this is the user-approved exception to offline execution. Block external networking and cross-program/main-schema access.
+- Keep source and declarative table definitions in agent-tools; never publish operational data or credentials. Reuse the same schema/data on upgrades and rollback, and recreate schemas on other main servers from pinned Git manifests. Restore data and the encryption key from separate backups.

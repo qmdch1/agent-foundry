@@ -15,7 +15,7 @@ estimated_saved_tokens_per_use (integer), capability (a short reusable descripti
 specific input values, credentials, endpoints, filenames or arbitrary instructions), and reason.
 Penalize one-off questions, explanations, trivial arithmetic and existing primitives. Account for
 generation, testing, dependencies, storage and maintenance costs. Do not recommend online APIs or DB
-access without an approved adapter. Prefer stateless local transformations. Do not output code.
+access to external systems without an approved adapter. Tools may persist their own data in an isolated schema of the central database. Prefer stateless transformations when persistence is unnecessary. Do not output code.
 """
 
 BUILDER_SYSTEM = """Build one reusable deterministic Python JSON tool for the requested capability.
@@ -26,11 +26,20 @@ descriptive lowercase hyphenated name. Implement run(input_data: dict) -> dict i
 Support CLI: json.load(sys.stdin), call run, print one JSON object, no stdout logs.
 Tests import from app.main import run. Include meaningful normal, edge and invalid-input tests;
 at least two examples with expected output in manifest. Schemas must be precise JSON object schemas.
-Do not use network, secrets, shell, filesystem writes, host state, dynamic package installation,
+Do not use external network, external secrets, shell, filesystem writes, host state, dynamic package installation,
 wall clock or randomness. Prefer the standard library. Dependencies must be supplied in the approved
 package==version allowlist. Never generate Dockerfiles, Compose, shell scripts or SQL.
-Use runtime python, execution_type process, entrypoint app/main.py, visibility public, network none,
-side_effects false. requires_db=false and tables=[] for stateless tools.
+Use runtime python, execution_type process, entrypoint app/main.py, visibility public,
+side_effects false (no external effects beyond the tool's own declared database data).
+For stateless tools use requires_db=false, tables=[], network=none.
+For persistence use requires_db=true, network=database and declarative tables/ordinary indexes.
+The platform automatically creates a private schema and an isolated login. Never create or guess
+database/schema/role names, endpoints or passwords. psycopg is already provided by the platform.
+Read os.environ["FOUNDRY_TOOL_DATABASE_URL"] and connect with psycopg.connect(...).
+Use unqualified table names, parameterized SQL, bounded queries and transactions. Do not change
+search_path, connect to any other database, run DDL, use keys/constraints or request elevated permissions.
+Tests and samples start with empty declared tables in temporary schemas, never production data.
+Test repeated stateful operations in unit tests; each example starts from a separate empty schema.
 Selection rules, if supplied, must be fully anchored with named groups and deterministic type mapping.
 Never put sample customer inputs or private data into source, README or manifest; use synthetic samples.
 """
@@ -111,9 +120,10 @@ class Builder:
             or manifest.visibility != "public"
             or manifest.endpoint
             or manifest.secret_name
-            or manifest.requires_db
         ):
-            raise PolicyError("Automatic building permits stateless offline Python tools only")
+            raise PolicyError(
+                "Automatic building permits isolated Python tools and their declared central database only"
+            )
         if not {"app/main.py", "README.md"}.issubset(bundle.files) or not any(
             name.startswith("tests/test_") and name.endswith(".py") for name in bundle.files
         ):
@@ -127,6 +137,13 @@ class Builder:
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(content, encoding="utf-8")
         (directory / "manifest.json").write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+        if manifest.requires_db:
+            migrations = directory / "migrations"
+            migrations.mkdir()
+            (migrations / "001_tables.json").write_text(
+                json.dumps([t.model_dump() for t in manifest.tables], ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
         requirements = []
         for dependency in manifest.dependencies:
             digest = self.settings.approved_dependencies.get(dependency)

@@ -1,19 +1,19 @@
-import hashlib
 import json
 import re
 import tarfile
 import tempfile
 from pathlib import Path
 
-from psycopg import sql
-
 from .models import Manifest
+from .program_databases import ProgramDatabases
 from .security import PolicyError, safe_path
 
 
 class Deployment:
     def __init__(self, registry, sandbox, commands, settings):
         self.registry, self.sandbox, self.commands, self.settings = registry, sandbox, commands, settings
+        self.databases = ProgramDatabases(registry.db, settings)
+        self.sandbox.databases = self.databases
 
     async def checkout(self, repository, commit, repository_path):
         if repository != self.settings.tool_repository or not re.fullmatch(r"[0-9a-f]{40}", commit):
@@ -49,80 +49,7 @@ class Deployment:
         return safe_path(root, repository_path)
 
     async def apply_tables(self, manifest, commit):
-        if not manifest.tables:
-            return
-        # Additive, platform-generated SQL only. No model-authored SQL is executed.
-        checksum = hashlib.sha256(
-            json.dumps([t.model_dump() for t in manifest.tables], sort_keys=True).encode()
-        ).hexdigest()
-        schema = "tool_" + manifest.program_id.hex
-        async with self.registry.db.pool.connection() as conn:
-            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (schema,))
-            if await (
-                await conn.execute(
-                    "SELECT 1 FROM agent.tool_migrations WHERE program_id=%s AND checksum=%s",
-                    (manifest.program_id, checksum),
-                )
-            ).fetchone():
-                return
-            await conn.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
-            for table in manifest.tables:
-                columns = sql.SQL(",").join(
-                    sql.SQL("{} {}").format(sql.Identifier(name), sql.SQL(kind))
-                    for name, kind in table.columns.items()
-                )
-                await conn.execute(
-                    sql.SQL("CREATE TABLE IF NOT EXISTS {}.{} ({})").format(
-                        sql.Identifier(schema), sql.Identifier(table.name), columns
-                    )
-                )
-                actual = await (
-                    await conn.execute(
-                        """SELECT column_name,data_type FROM information_schema.columns
-                    WHERE table_schema=%s AND table_name=%s""",
-                        (schema, table.name),
-                    )
-                ).fetchall()
-                types = {
-                    "text": "text",
-                    "integer": "integer",
-                    "bigint": "bigint",
-                    "numeric": "numeric",
-                    "boolean": "boolean",
-                    "jsonb": "jsonb",
-                    "timestamptz": "timestamp with time zone",
-                }
-                known = {c["column_name"]: c["data_type"] for c in actual}
-                for name, kind in table.columns.items():
-                    if name in known and known[name] != types[kind]:
-                        raise PolicyError("Existing column type differs; destructive migration refused")
-                    if name not in known:
-                        await conn.execute(
-                            sql.SQL("ALTER TABLE {}.{} ADD COLUMN {} {}").format(
-                                sql.Identifier(schema),
-                                sql.Identifier(table.name),
-                                sql.Identifier(name),
-                                sql.SQL(kind),
-                            )
-                        )
-                for index in table.indexes:
-                    index_name = "idx_" + hashlib.sha256((table.name + str(index)).encode()).hexdigest()[:24]
-                    await conn.execute(
-                        sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                            sql.Identifier(index_name),
-                            sql.Identifier(schema),
-                            sql.Identifier(table.name),
-                            sql.SQL(",").join(map(sql.Identifier, index)),
-                        )
-                    )
-            await conn.execute(
-                "INSERT INTO agent.tool_migrations(program_id,checksum,git_commit) VALUES (%s,%s,%s)",
-                (manifest.program_id, checksum, commit),
-            )
-        await self.registry.db.event(
-            "additive_migration",
-            {"program_id": str(manifest.program_id), "git_commit": commit, "checksum": checksum},
-        )
+        return await self.databases.ensure(manifest, commit)
 
     async def deploy(self, manifest, directory, commit, *, activate=True):
         image = await self.sandbox.build(directory, manifest)

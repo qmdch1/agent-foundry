@@ -93,3 +93,15 @@ CREATE TABLE IF NOT EXISTS agent.prompt_baselines (
     observed_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS prompt_baselines_lookup ON agent.prompt_baselines(prompt_hash,observed_at DESC);
+CREATE TABLE IF NOT EXISTS agent.program_databases (
+    program_id uuid NOT NULL, connection_name text NOT NULL DEFAULT 'central',
+    schema_name text NOT NULL, role_name text NOT NULL, secret_name text NOT NULL,
+    encrypted_credentials text NOT NULL, status text NOT NULL DEFAULT 'READY',
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS program_databases_program ON agent.program_databases(program_id);
+CREATE TABLE IF NOT EXISTS agent.database_test_scopes (
+    id uuid NOT NULL, schema_name text NOT NULL, role_name text NOT NULL,
+    expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS database_test_scopes_expiry ON agent.database_test_scopes(expires_at);

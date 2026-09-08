@@ -22,6 +22,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run foundry init-env}
     ports: ["127.0.0.1:55439:5432"]
     volumes: ["registry-data:/var/lib/postgresql/data"]
+    networks: [default, program-database]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U foundry -d foundry"]
       interval: 5s
@@ -83,3 +84,7 @@ volumes:
   registry-data:
   foundry-state:
   tools-checkout:
+networks:
+  program-database:
+    name: ${FOUNDRY_TOOL_DATABASE_NETWORK:-agent-foundry-database}
+    internal: true

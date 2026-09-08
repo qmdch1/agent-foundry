@@ -56,11 +56,13 @@ class Worker:
     async def run(self, once=False):
         next_sync = 0
         while True:
-            if self.catalog and self.settings.catalog_enabled and time.monotonic() >= next_sync:
+            if time.monotonic() >= next_sync:
                 try:
-                    await self.catalog.sync()
+                    await self.deployment.databases.reap_tests()
+                    if self.catalog and self.settings.catalog_enabled:
+                        await self.catalog.sync()
                 except Exception as exc:
-                    await self.queue.db.event("catalog_sync_failed", {"error": type(exc).__name__})
+                    await self.queue.db.event("worker_maintenance_failed", {"error": type(exc).__name__})
                 next_sync = time.monotonic() + self.settings.catalog_sync_seconds
             job = await self.queue.claim()
             if job:

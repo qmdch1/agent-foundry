@@ -69,7 +69,7 @@ class Manifest(StrictModel):
     limits: Limits = Field(default_factory=Limits)
     requires_db: bool = False
     tables: list[TableDefinition] = Field(default_factory=list, max_length=10)
-    network: Literal["none"] = "none"
+    network: Literal["none", "database"] = "none"
     dependencies: list[str] = Field(default_factory=list, max_length=20)
     endpoint: str | None = None
     method: Literal["GET", "POST"] = "GET"
@@ -114,6 +114,10 @@ class Manifest(StrictModel):
             raise ValueError("HTTP programs require an administrator-provided endpoint")
         if self.requires_db != bool(self.tables):
             raise ValueError("requires_db must match declarative table definitions")
+        if self.network == "database" and not self.requires_db:
+            raise ValueError("The database network requires declared program tables")
+        if self.requires_db and self.runtime != "python":
+            raise ValueError("Managed program schemas are supported by Python tools")
         for example in self.examples:
             validate_json(example.input, self.input_schema)
             validate_json(example.output, self.output_schema)

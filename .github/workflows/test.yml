@@ -29,3 +29,5 @@ jobs:
       - run: node --check src/agent_foundry/web/app.js
       - run: docker build -f Dockerfile.sandbox -t agent-foundry-sandbox:0.1.0 .
       - run: uv run pytest -q
+        env:
+          FOUNDRY_TEST_DATABASE_CONTAINER: ${{ job.services.postgres.id }}

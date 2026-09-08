@@ -42,6 +42,10 @@ async def container(settings):
     app = Container(settings)
     await app.open()
     await app.db.migrate()
+    for scope in await app.db.fetch("SELECT * FROM agent.database_test_scopes"):
+        await app.deployment.databases.remove_test_scope(
+            scope["id"], scope["schema_name"], scope["role_name"]
+        )
     for table in (
         "programs",
         "releases",
@@ -55,6 +59,7 @@ async def container(settings):
         "catalog_sync",
         "request_usage",
         "prompt_baselines",
+        "program_databases",
     ):
         await app.db.execute(f"DELETE FROM agent.{table}")
     await seed(app.registry)

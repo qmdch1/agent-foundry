@@ -52,6 +52,15 @@ class Registry:
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (str(manifest.program_id),)
             )
+            if status == "ACTIVE" and manifest.requires_db:
+                bindings = await (
+                    await conn.execute(
+                        "SELECT schema_name FROM agent.program_databases WHERE program_id=%s AND status='READY'",
+                        (manifest.program_id,),
+                    )
+                ).fetchall()
+                if len(bindings) != 1 or bindings[0]["schema_name"] != "tool_" + manifest.program_id.hex:
+                    raise PolicyError("Active database tools require a ready central schema binding")
             old = await (
                 await conn.execute(
                     "SELECT * FROM agent.programs WHERE id=%s FOR UPDATE", (manifest.program_id,)

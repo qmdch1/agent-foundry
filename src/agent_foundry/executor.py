@@ -10,6 +10,7 @@ import httpx
 
 from .models import Manifest, validate_json
 from .primitives import builtin
+from .program_databases import ProgramDatabases
 from .security import PolicyError
 
 
@@ -30,6 +31,7 @@ class Executor:
     def __init__(self, registry, sandbox, settings):
         self.registry, self.sandbox, self.settings = registry, sandbox, settings
         self.semaphore = asyncio.Semaphore(settings.executor_concurrency)
+        self.databases = ProgramDatabases(registry.db, settings)
 
     async def http(self, manifest, data):
         endpoint = urlsplit(manifest.endpoint or "")
@@ -95,7 +97,8 @@ class Executor:
                         receipt = json.loads(receipt_path.read_text())
                         if receipt["manifest"] != row["manifest"]:
                             raise PolicyError("Registry and deployed manifest disagree")
-                        raw = await self.sandbox.run(receipt["image"], manifest, data)
+                        env = await self.databases.runtime(program_id) if manifest.requires_db else None
+                        raw = await self.sandbox.run(receipt["image"], manifest, data, database_env=env)
                         result = json.loads(raw)
                     validate_json(result, manifest.output_schema)
                     if len(json.dumps(result).encode()) > self.settings.max_output_bytes:

@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     database_queries: dict[str, str] = {}  # admin-owned query_id -> parameterized SQL
     query_database_secret: str = "FOUNDRY_QUERY_DATABASE_URL"
     db_pool_max: int = Field(8, ge=2, le=32)
+    tool_database_network: str = "agent-foundry-database"
+    tool_database_host: str = "postgres"
+    tool_database_port: int = Field(5432, ge=1, le=65535)
+    tool_database_connection_limit: int = Field(2, ge=1, le=10)
+    tool_database_statement_timeout_ms: int = Field(5000, ge=100, le=60000)
+    tool_database_lock_timeout_ms: int = Field(1000, ge=100, le=10000)
 
     @model_validator(mode="after")
     def validate_weights(self):
