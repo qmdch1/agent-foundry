@@ -28,3 +28,5 @@
 
 .summary-category{display:flex;align-items:center;gap:14px;width:100%;min-height:78px;padding:12px;border:1px solid transparent;border-radius:10px;background:transparent;color:inherit;text-align:left;cursor:pointer}.summary-category:hover{background:#f5f7fc}.summary-category.active{background:#edf2ff;border-color:#aebff4}.summary-category.active small{color:#3858b5}.summary-category .summary-icon{flex-shrink:0}.summary-category small{overflow-wrap:anywhere}
 @media(max-width:540px){.summary-category{padding:10px 6px;min-height:78px;gap:0}.summary-strip>div,.summary-strip>div+div{padding-left:0;border-left:0}.summary-strip{gap:6px}.summary-category small{font-size:11px}}
+
+.program-card-footer{flex-wrap:wrap;gap:9px}.program-use-metrics{display:inline-flex;align-items:center;gap:10px;margin-left:auto;color:#66758a}.program-use-metrics>span{white-space:nowrap;display:inline-flex;align-items:center;gap:3px}

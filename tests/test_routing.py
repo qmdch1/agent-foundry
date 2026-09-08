@@ -10,6 +10,33 @@ from agent_foundry.security import PolicyError
 from agent_foundry.seed import seed_manifests
 
 
+async def test_named_tool_prefix_finds_unseen_input_without_llm(container):
+    from agent_foundry.models import Manifest
+
+    manifest = Manifest(
+        name="lookup-tool",
+        description="Lookup a supplied opaque identifier deterministically.",
+        input_schema={
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"],
+            "additionalProperties": False,
+        },
+        output_schema={"type": "object"},
+        version="1.0.0",
+        selection_rules=[{"pattern": "^lookup-tool (?P<value>[A-Z0-9]+)$", "fields": {"value": "string"}}],
+    )
+    await container.registry.register(manifest, status="ACTIVE", commit="b" * 40, evidence={"passed": True})
+    candidates = await container.search.search("LOOKUP-TOOL X928372993877")
+    assert candidates[0].program_id == manifest.program_id
+    assert candidates[0].mapped_input == {"value": "X928372993877"}
+    plan, route = await container.router.route("LOOKUP-TOOL X928372993877", candidates, uuid4())
+    assert route == "deterministic" and plan.action == "execute"
+    assert all(
+        c.mapped_input is None for c in await container.search.search("lookup-tool-not-found X928372993877")
+    )
+
+
 def candidate(score=1, mapped=True):
     m = seed_manifests()[0]
     return Candidate(

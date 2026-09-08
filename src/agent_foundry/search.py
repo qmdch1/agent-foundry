@@ -50,13 +50,15 @@ class ProgramSearch:
               AND (search_vector @@ q.tsq OR search_text %% %s
                    OR EXISTS (SELECT 1 FROM jsonb_array_elements(examples) e
                               WHERE lower(e->>'prompt')=lower(%s))
-                   OR name='calculator')
+                   OR name='calculator'
+                   OR p.name=lower(split_part(btrim(%s),' ',1)))
             ORDER BY rank DESC,priority DESC,name LIMIT %s""",
             (
                 prompt,
                 prompt.lower(),
                 include_disabled,
                 prompt.lower(),
+                prompt,
                 prompt,
                 self.settings.search_top_k * 4,
             ),
