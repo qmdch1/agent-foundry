@@ -1,0 +1,81 @@
+name: agent-foundry
+x-platform: &platform
+  image: agent-foundry:0.1.0
+  build: .
+  env_file: .env
+  environment: &environment
+    FOUNDRY_DATABASE_URL: postgresql://foundry:${POSTGRES_PASSWORD:?Run foundry init-env}@postgres:5432/foundry
+    FOUNDRY_STATE_ROOT: /state
+    FOUNDRY_TOOL_REPOSITORY_ROOT: /tools-repository
+    FOUNDRY_FILE_ROOT: /state/files
+  init: true
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: foundry
+      POSTGRES_DB: foundry
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run foundry init-env}
+    ports: ["127.0.0.1:55439:5432"]
+    volumes: ["registry-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foundry -d foundry"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 768m
+    cpus: 1
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+  migrate:
+    <<: *platform
+    command: ["foundry", "migrate"]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+    mem_limit: 256m
+    cpus: 0.5
+  api:
+    <<: *platform
+    ports: ["127.0.0.1:8000:8000"]
+    volumes:
+      - foundry-state:/state
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add: ["${DOCKER_GID:-0}"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    mem_limit: 512m
+    cpus: 1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+  builder:
+    <<: *platform
+    command: ["foundry", "worker"]
+    volumes:
+      - foundry-state:/state
+      - tools-checkout:/tools-repository
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add: ["${DOCKER_GID:-0}"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    mem_limit: 768m
+    cpus: 1
+  sandbox-image:
+    image: agent-foundry-sandbox:0.1.0
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    profiles: ["images"]
+volumes:
+  registry-data:
+  foundry-state:
+  tools-checkout:

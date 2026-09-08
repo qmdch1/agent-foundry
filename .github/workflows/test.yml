@@ -1,0 +1,30 @@
+name: Verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: foundry
+          POSTGRES_DB: foundry_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U foundry -d foundry_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      FOUNDRY_TEST_DATABASE_URL: postgresql://foundry@localhost:5432/foundry_test
+      FOUNDRY_TEST_DOCKER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+      - run: uv sync --frozen --extra dev
+      - run: uv run ruff check .
+      - run: docker build -f Dockerfile.sandbox -t agent-foundry-sandbox:0.1.0 .
+      - run: uv run pytest -q
