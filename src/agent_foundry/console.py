@@ -38,6 +38,9 @@ def console_router(services):
     @router.post("/ui/login")
     async def login(data: Login, request: Request, response: Response):
         sessions.same_origin(request)
+        local = sessions.local_admin(request)
+        if local:
+            return {"authenticated": True, **local}
         role = None
         if data.launch_token:
             if await sessions.consume_launch(data.launch_token):
@@ -64,6 +67,9 @@ def console_router(services):
     @router.post("/ui/logout", dependencies=[Depends(signed_in)])
     async def logout(request: Request, response: Response):
         await sessions.logout(request, response)
+        local = sessions.local_admin(request)
+        if local:
+            return {"authenticated": True, **local}
         return {"authenticated": False}
 
     @router.get("/ui/overview", dependencies=[Depends(signed_in)])

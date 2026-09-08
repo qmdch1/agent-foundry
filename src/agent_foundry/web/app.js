@@ -55,12 +55,12 @@ async function api(path, options={}) {
 }
 function openLogin(){ $("#login-error").textContent="";$("#login-dialog").showModal();setTimeout(()=>$("#access-key").focus(),50); }
 function updateIdentity(){
-  const connected=state.session.authenticated, admin=state.session.role==="admin";
-  $("#account-title").textContent=connected?(admin?"관리자 워크스페이스":"사용자 워크스페이스"):"워크스페이스 연결";
-  $("#account-subtitle").textContent=connected?"클릭하여 연결 해제":"접속 키로 시작하기";
-  $("#mobile-account").setAttribute("aria-label",connected?"워크스페이스 연결 해제":"워크스페이스 연결");
-  $("#mobile-account").title=connected?"워크스페이스 연결 해제":"워크스페이스 연결";
-  $("#sidebar-status").textContent=connected?"워크스페이스 연결됨":"연결 전";
+  const connected=state.session.authenticated, admin=state.session.role==="admin", local=state.session.auth_mode==="local_admin";
+  $("#account-title").textContent=local?"로컬 관리자":connected?(admin?"관리자 워크스페이스":"사용자 워크스페이스"):"워크스페이스 연결";
+  $("#account-subtitle").textContent=local?"로그인 없이 전체 기능 사용":connected?"클릭하여 연결 해제":"접속 키로 시작하기";
+  $("#mobile-account").setAttribute("aria-label",local?"로컬 관리자 설정":connected?"워크스페이스 연결 해제":"워크스페이스 연결");
+  $("#mobile-account").title=local?"로컬 관리자 설정":connected?"워크스페이스 연결 해제":"워크스페이스 연결";
+  $("#sidebar-status").textContent=local?"로컬 관리자 모드":connected?"워크스페이스 연결됨":"연결 전";
   $("#sidebar-status-dot").classList.toggle("connected",connected);
   $("#settings-fields").disabled=!admin;
   $("#save-settings").disabled=!admin;
@@ -194,7 +194,7 @@ async function login(event){
   catch(e){$("#login-error").textContent=e.message;}
   finally{$("#login-submit").disabled=false;}
 }
-async function logout(){try{await api("/ui/logout",{method:"POST"});state.session={authenticated:false};state.responses=[];$("#results").innerHTML=emptyResponse;$("#provider-key").value="";$("#prompt-input").value="";updatePromptCount();updateIdentity();if(state.page==="programs")loadPrograms();toast("워크스페이스 연결을 해제했습니다.");}catch(e){toast(e.message,true);}}
+async function logout(){if(state.session.auth_mode==="local_admin"){showPage("settings");return;}try{await api("/ui/logout",{method:"POST"});state.session={authenticated:false};state.responses=[];$("#results").innerHTML=emptyResponse;$("#provider-key").value="";$("#prompt-input").value="";updatePromptCount();updateIdentity();if(state.page==="programs")loadPrograms();toast("워크스페이스 연결을 해제했습니다.");}catch(e){toast(e.message,true);}}
 document.addEventListener("click",async event=>{
   const button=event.target.closest("button");if(!button)return;
   if(button.dataset.page)showPage(button.dataset.page);

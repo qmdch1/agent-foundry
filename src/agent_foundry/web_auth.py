@@ -20,7 +20,21 @@ class WebSessions:
         if request.headers.get("origin") != expected:
             raise HTTPException(403, "같은 웹 주소에서 다시 시도해주세요.")
 
+    def local_admin(self, request):
+        if not self.settings.local_admin or request.url.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            return None
+        # Docker forwards loopback traffic through its bridge. The published port stays loopback-bound.
+        # Browser requests from another site must not inherit this machine's local administrator access.
+        if request.headers.get("origin") is not None:
+            self.same_origin(request)
+        if request.headers.get("sec-fetch-site") == "cross-site":
+            raise HTTPException(403, "로컬 관리자 화면에서 다시 시도해주세요.")
+        return {"role": "admin", "auth_mode": "local_admin"}
+
     async def current(self, request):
+        local = self.local_admin(request)
+        if local:
+            return local
         token = request.cookies.get(COOKIE_NAME, "")
         if not token or len(token) > 100:
             return None
@@ -37,6 +51,8 @@ class WebSessions:
             raise HTTPException(401, "워크스페이스에 연결해주세요.")
         if admin and session["role"] != "admin":
             raise HTTPException(403, "설정 변경은 관리자만 할 수 있습니다.")
+        if session.get("auth_mode") == "local_admin":
+            return session
         if request.method not in {"GET", "HEAD"}:
             self.same_origin(request)
             if not secrets.compare_digest(

@@ -45,12 +45,16 @@ def create_app(settings=None, container=None):
             raise HTTPException(401, "Invalid credentials")
 
     async def user_auth(request: Request, authorization: str | None = Header(None)):
+        if services.web_sessions.local_admin(request):
+            return
         if authorization is not None:
             auth(settings.api_key.get_secret_value(), authorization)
         else:
             await services.web_sessions.authorize(request)
 
     async def admin_auth(request: Request, authorization: str | None = Header(None)):
+        if services.web_sessions.local_admin(request):
+            return
         if authorization is not None:
             auth(settings.admin_key.get_secret_value(), authorization)
         else:

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_private_hosts: list[str] = []
     web_session_hours: int = Field(8, ge=1, le=24)
+    local_admin: bool = False
     main_model: str = ""
     router_model: str = ""
     evaluator_model: str = ""
