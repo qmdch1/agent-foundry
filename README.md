@@ -1,3 +1,5 @@
+[메인 프로그램 · agent-foundry](https://github.com/qmdch1/agent-foundry) | [서브 프로그램 · agent-tools](https://github.com/qmdch1/agent-tools)
+
 # Agent Foundry
 
 사용자 자연어 요청에서 필요한 프로그램만 검색하고, 재사용 가능한 Python 기능을 별도 Worker에서
