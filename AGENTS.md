@@ -1,5 +1,14 @@
 # Agent Foundry
 
+## Host AI delegation policy
+
+- For this project's program creation, the user's selected parent model owns planning, task decomposition, acceptance criteria and final review. Do not change the parent model to Spark.
+- Delegate bounded implementation and focused tests to a separate `gpt-5.3-codex-spark` agent when the input/output contract, permitted files and acceptance checks are already clear. Examples: a small deterministic function, parser, formatter, or a limited change within an existing tool. Pass the plan and relevant files, not the entire conversation.
+- Keep architecture, ambiguous requirements, authentication/permissions, database provisioning/migrations, deployment and publication decisions with the parent. The parent reviews the diff and validation evidence before the normal tested deployment/push pipeline.
+- Use the host's supported model-specific subagent mechanism. If Spark is unavailable there, a separate local `codex exec -m gpt-5.3-codex-spark -c model_reasoning_effort=high` process is permitted; use a bounded task directory and appropriate sandbox, pass the task through stdin, collect JSON events with `--json`, and monitor completion. Never run concurrent writers on the same files or let a child recursively delegate. Do not use sandbox bypass flags. Do not silently substitute another model if Spark is unavailable; report the limitation and continue with the selected parent model.
+- Reported child usage belongs to its actual task only. Do not attribute readiness checks or planning tokens to a generated tool. Preserve the existing generation-token accounting rules.
+- This is a host AI rule, not an automatic model switch in Foundry's API Builder. Preserve the existing answer-first/background-generation flow and the user-designated conversation scope. Do not start a dummy program just to exercise delegation.
+
 - Main platform repository: `https://github.com/qmdch1/agent-foundry.git`, folder `agent-foundry`.
 - Public distribution uses local STDIO MCP (`foundry-mcp`) with per-person Compose/DB/Worker state. `init-env --local` enables tested local Git releases and disables push. A personal fork and personal credential are optional for sharing; never distribute maintainer credentials. Expose only bounded search, public execution, review submission, install, job status and catalog-sync tools, not admin SQL/shell/settings. Preserve host AI usage separately from Foundry token estimates.
 - Local release activation is an explicit exception to push-before-activation: require `local_releases_enabled`, immutable Git archive, and all normal tests/health checks. Unpushed commits are not catalog publications; recovery requires the local tools-checkout volume. Shared mode still requires successful push before activation.
