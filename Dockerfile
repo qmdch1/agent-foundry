@@ -6,6 +6,7 @@ WORKDIR /app
 COPY requirements.lock /app/requirements.lock
 RUN pip install --no-cache-dir --require-hashes -r /app/requirements.lock
 COPY pyproject.toml /app/pyproject.toml
+COPY README.md LICENSE /app/
 COPY src /app/src
 RUN pip install --no-cache-dir --no-deps . && mkdir -p /state /tools-repository \
     && chown 10001:10001 /state /tools-repository

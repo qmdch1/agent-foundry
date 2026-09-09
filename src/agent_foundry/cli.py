@@ -14,6 +14,11 @@ from .seed import seed
 
 
 async def execute(args):
+    if args.command == "mcp-config":
+        from .mcp_config import configuration
+
+        print(configuration(args.project_dir, args.format))
+        return
     if args.command == "tool-tokens":
         from .generation_tokens import add_tokens
 
@@ -38,6 +43,16 @@ async def execute(args):
         }
         for before, after in replacements.items():
             text = text.replace(before, after)
+        if args.local:
+            text = text.replace("FOUNDRY_LOCAL_ADMIN=false", "FOUNDRY_LOCAL_ADMIN=true")
+            text = text.replace("FOUNDRY_GIT_PUSH=true", "FOUNDRY_GIT_PUSH=false")
+            text = text.replace("FOUNDRY_LOCAL_RELEASES_ENABLED=false", "FOUNDRY_LOCAL_RELEASES_ENABLED=true")
+        if args.repository:
+            import re
+
+            if not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git", args.repository):
+                raise PolicyError("Use a credential-free HTTPS GitHub repository URL ending in .git")
+            text = text.replace("https://github.com/qmdch1/agent-tools.git", args.repository)
         destination.write_text(text)
         destination.chmod(0o600)
         print("Created .env with separate random secrets; configure LLM models and credentials locally.")
@@ -103,7 +118,17 @@ async def execute(args):
 def main():
     parser = argparse.ArgumentParser(prog="foundry")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("init-env", "migrate", "reconcile", "catalog-sync"):
+    mcp_config = commands.add_parser("mcp-config", help="Print local MCP settings without secrets")
+    mcp_config.add_argument("--project-dir", type=Path, default=Path.cwd())
+    mcp_config.add_argument("--format", choices=("codex", "json"), default="codex")
+    init = commands.add_parser("init-env")
+    init.add_argument(
+        "--local", action="store_true", help="Local administrator and private local Git releases; no push"
+    )
+    init.add_argument(
+        "--repository", help="Optional personal agent-tools fork URL; choose before first start"
+    )
+    for name in ("migrate", "reconcile", "catalog-sync"):
         commands.add_parser(name)
     worker = commands.add_parser("worker")
     tokens = commands.add_parser("tool-tokens")

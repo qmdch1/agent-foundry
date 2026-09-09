@@ -1,6 +1,8 @@
 # Agent Foundry
 
 - Main platform repository: `https://github.com/qmdch1/agent-foundry.git`, folder `agent-foundry`.
+- Public distribution uses local STDIO MCP (`foundry-mcp`) with per-person Compose/DB/Worker state. `init-env --local` enables tested local Git releases and disables push. A personal fork and personal credential are optional for sharing; never distribute maintainer credentials. Expose only bounded search, public execution, review submission, install, job status and catalog-sync tools, not admin SQL/shell/settings. Preserve host AI usage separately from Foundry token estimates.
+- Local release activation is an explicit exception to push-before-activation: require `local_releases_enabled`, immutable Git archive, and all normal tests/health checks. Unpushed commits are not catalog publications; recovery requires the local tools-checkout volume. Shared mode still requires successful push before activation.
 - Generated programs belong only to the separate sibling repository `https://github.com/qmdch1/agent-tools.git`, under `tools/<name>`. Never vendor its checkout into this repository.
 - Keep API/search/router/executor separate from evaluation/build workers. User responses never wait for tool generation.
 - Search this platform's installed Registry first, then the indexed GitHub tool catalog. Refresh the approved Git repository in the separate Worker before creating a missing capability. Import a published suitable tool instead of generating a duplicate. Never equate Git lookup failure with an empty repository.

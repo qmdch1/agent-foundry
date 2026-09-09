@@ -422,18 +422,19 @@ class Builder:
                     cwd=root,
                 )
                 commit = (await self.commands.run(["git", "rev-parse", "HEAD"], cwd=root)).decode().strip()
-                if not self.settings.git_push:
+                if not self.settings.git_push and not self.settings.local_releases_enabled:
                     return "SUCCEEDED", {
                         "status": "TESTED_LOCAL",
                         "git_commit": commit,
                         "reason": "Git push disabled; release is not active",
                     }
-                await self.commands.run(
-                    ["git", "push", "origin", f"HEAD:refs/heads/{self.settings.git_branch}"],
-                    cwd=root,
-                    timeout=self.settings.build_timeout,
-                )
-            # Activate only source fetched back from the committed repository.
+                if self.settings.git_push:
+                    await self.commands.run(
+                        ["git", "push", "origin", f"HEAD:refs/heads/{self.settings.git_branch}"],
+                        cwd=root,
+                        timeout=self.settings.build_timeout,
+                    )
+            # Explicit local mode re-reads the immutable local commit; shared mode requires push first.
             released = await self.deployment.checkout(
                 self.settings.tool_repository, commit, f"tools/{manifest.name}"
             )
@@ -445,4 +446,5 @@ class Builder:
                 "version": manifest.version,
                 "git_commit": commit,
                 "status": "ACTIVE",
+                "published": self.settings.git_push,
             }

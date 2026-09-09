@@ -23,6 +23,20 @@ class Deployment:
             raise PolicyError("Only the approved repository and full immutable commits are accepted")
         if not re.fullmatch(r"tools/[a-z][a-z0-9-]{2,47}", repository_path):
             raise PolicyError("Repository path must identify one tool directory")
+        local = self.settings.tool_repository_root.resolve()
+        if self.settings.local_releases_enabled and (local / ".git").is_dir():
+            remote = await self.commands.run(["git", "remote", "get-url", "origin"], cwd=local)
+            if remote.decode().strip() != repository:
+                raise PolicyError("Local release checkout differs from approved repository")
+            try:
+                await self.commands.run(["git", "cat-file", "-e", commit + "^{commit}"], cwd=local)
+            except PolicyError:
+                pass  # Published commits not present locally still come from the approved remote.
+            else:
+                raw = await self.commands.run(
+                    ["git", "archive", commit, "--", repository_path], cwd=local, limit=3_000_000
+                )
+                return self.extract(raw, commit, repository_path)
         cache = self.settings.state_root.resolve() / "git-cache"
         cache.parent.mkdir(parents=True, exist_ok=True)
         if not cache.exists():
@@ -39,6 +53,9 @@ class Deployment:
         raw = await self.commands.run(
             ["git", "--git-dir", str(cache), "archive", commit, "--", repository_path], limit=3_000_000
         )
+        return self.extract(raw, commit, repository_path)
+
+    def extract(self, raw, commit, repository_path):
         root = self.settings.state_root.resolve() / "releases" / commit
         root.mkdir(parents=True, exist_ok=True)
         import io

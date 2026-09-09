@@ -1,6 +1,8 @@
-# 배포와 AI 연결
+# 관리·배포와 AI 연결
 
 [메인 프로그램](https://github.com/qmdch1/agent-foundry) · [서브 프로그램](https://github.com/qmdch1/agent-tools)
+
+개인 PC의 기본 설치·MCP 연결은 [LOCAL_MCP.md](LOCAL_MCP.md)를 먼저 보세요. 이 문서는 관리·복구 및 선택적인 서버 운영을 설명합니다.
 
 이 문서는 저장소의 Compose, CLI, API 구현을 기준으로 설명합니다. 프로그램 생성·확장 기능은
 테스트로 검증하며, 실제 유료 LLM의 생성 품질·속도는 사용할 API 키와 모델로 별도 확인해야 합니다.
@@ -33,8 +35,8 @@ Git, Python 3.12 이상, uv, Docker Engine와 Docker Compose가 필요합니다.
 두 GitHub 저장소가 비공개이면 먼저 호스트 Git의 credential helper에 접근 계정을 연결합니다.
 
 ```bash
-mkdir -p /home/bespin_user/projects
-cd /home/bespin_user/projects
+mkdir -p ~/projects
+cd ~/projects
 git clone https://github.com/qmdch1/agent-foundry.git
 git clone https://github.com/qmdch1/agent-tools.git
 cd agent-foundry
@@ -118,7 +120,7 @@ docker compose exec -T builder foundry catalog-sync
 ```
 
 `catalog-sync`는 원격 읽기 확인입니다. 쓰기 권한은 실제 생성·확장 작업의 push에서 확인됩니다.
-push 실패를 성공으로 표시하거나 새 버전을 ACTIVE로 바꾸지 않습니다. 로컬 commit만 남았다면
+공유 모드의 push 실패는 성공으로 표시하거나 새 버전을 ACTIVE로 바꾸지 않습니다. 로컬 모드(`FOUNDRY_LOCAL_RELEASES_ENABLED=true`, `FOUNDRY_GIT_PUSH=false`)는 push 없이 고정 로컬 commit을 검증해 활성화하며, 공유 카탈로그에는 등록하지 않습니다. 로컬 commit만 남았다면
 인증을 수정해 해당 commit을 push한 뒤 다음 명령으로 고정 버전을 배포할 수 있습니다.
 
 ```bash
@@ -189,8 +191,7 @@ async def submit_review_after_answer(payload: dict):
 완료를 기다리지 않습니다. `FOUNDRY_SERVER_URL`은 위 예제의 외부 클라이언트용 변수입니다.
 
 **이 API만 배포하면 모든 Codex 대화가 자동 연결되는 것은 아닙니다.** 외부 AI의 후속 호출
-또는 호스트 연결 코드가 있어야 합니다. 이 작업공간의 자동 검토 정책은 사용자가 지정한
-`agent-foundry` 스레드의 앞으로의 대화에만 적용하며, 다른 스레드/과거 대화를 수집하지 않습니다.
+또는 호스트 연결 코드가 있어야 합니다. 자동 검토는 사용자가 명시적으로 허용한 프로젝트·대화에만 적용하고 다른 대화나 과거 대화를 수집하지 않습니다.
 
 ## 6. 중앙 DB와 다른 서버 설치
 
@@ -207,7 +208,7 @@ docker compose exec -T builder foundry catalog-sync
 ```
 
 기존 플랫폼을 다른 서버에서 복구하려면 전용 DB 백업과 `FOUNDRY_JOB_ENCRYPTION_KEY`를 함께
-복원하고 DB 이름을 유지합니다. 역할을 복원하지 않는 방법을 택했다면 관리 계정으로
+복원하고 DB 이름을 유지합니다. 미공유 로컬 commit이 있다면 `tools-checkout` 볼륨도 함께 복원해야 합니다. 역할을 복원하지 않는 방법을 택했다면 관리 계정으로
 `--no-owner --no-acl` 방식으로 DB를 복원한 뒤 아래 reconcile이 프로그램 권한을 재구성합니다.
 실제 백업 파일 경로·복원 대상은 운영 절차에서 확정합니다.
 

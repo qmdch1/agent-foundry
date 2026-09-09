@@ -2,6 +2,7 @@
 
 # Agent Foundry
 
+각 사용자의 PC에서 AI 에이전트에 연결하는 로컬 MCP 도구 플랫폼입니다. 운영자의 공용 서버 없이
 사용자 자연어 요청에서 필요한 프로그램만 검색하고, 재사용 가능한 Python 기능을 별도 Worker에서
 생성·검증·배포하는 실행 가능한 MVP입니다. OpenAI 외 여러 AI 제공자를 선택해 연결할 수 있으며
 제공자 주소와 Main / Router / Evaluator / Builder 모델은 웹 설정 또는 환경설정으로 지정합니다.
@@ -15,7 +16,20 @@ projects/
   agent-tools/      # 별도 Git 저장소: tools/<name>/ 소스·manifest·테스트
 ```
 
+## 시작하기
+
+- [로컬 MCP 설치·Codex 및 다른 AI 연결](LOCAL_MCP.md)
+- [개인 AI API와 MCP를 연결하는 실행 예제](examples/api_agent.py)
+- [생성 템플릿](BUILD_TEMPLATES.md) · [관리·복구 가이드](DEPLOYMENT.md)
+- [MIT 라이선스](LICENSE)
+
+기본 로컬 설치는 생성한 프로그램을 개인 PC의 Git에 보관하고 바로 사용합니다. 공유를 선택할 때만 개인 Fork에 push합니다.
+AI 앱의 로그인이나 구독이 Builder API에 자동 연결되지는 않으며, 자동 생성에는 개인 API 설정이 필요합니다.
+
 ## 요청 처리
+
+아래는 웹/API 자체로 질문할 때의 흐름입니다. 로컬 MCP에서는 연결한 AI가 검색·실행을 직접 선택하므로
+Foundry의 Main·Router를 추가 호출하지 않습니다. 답변 후 검토만 별도 Worker에 전달합니다.
 
 ```mermaid
 flowchart LR
@@ -32,7 +46,7 @@ flowchart LR
   M --> Q[암호화된 평가 Job 저장]
   Q --> W[별도 Worker: 재사용·비용 평가]
   W -->|기준 통과| B[중복 재검색 → 생성 → 격리 테스트]
-  B --> G[Git commit/push → commit 재조회]
+  B --> G[로컬 Git commit / 공유 모드는 push → commit 재조회]
   G --> H[배포·검증 → ACTIVE 등록]
 ```
 
@@ -59,28 +73,44 @@ Main LLM 응답 생성 후 짧은 PostgreSQL outbox INSERT를 수행하고 응�
 
 ## 로컬 설치
 
-Python 3.12+, uv, Git, Docker Engine/Compose가 필요합니다.
+Git, Python 3.12 이상, uv, Docker Engine/Compose가 필요합니다. Docker를 실행한 뒤 작업 폴더에서:
 
 ```bash
-cd /home/bespin_user/projects
 git clone https://github.com/qmdch1/agent-foundry.git
-git clone https://github.com/qmdch1/agent-tools.git
 cd agent-foundry
-uv sync --frozen --extra dev
-uv run foundry init-env
-docker compose up -d postgres
-uv run foundry migrate
+uv sync --frozen
+uv run foundry init-env --local
 docker compose --profile images build sandbox-image
-uv run uvicorn agent_foundry.api:app --host 127.0.0.1 --port 8000
+docker compose up -d --build api builder
 ```
 
-다른 터미널에서 `uv run foundry worker`를 실행합니다. 웹의 연결 및 모델 설정 또는 `.env`에
-API 제공자 주소, API key, 역할별 모델을 지정해야 일반 LLM 답변과 자동 생성이 작동합니다. 키·비밀번호를 터미널 출력,
-Git 또는 Registry에 복사하지 않습니다. 모델 이름을 임의의 제품으로 고정하지 않았습니다.
-LLM이 설정되지 않아도 계산기와 이미 등록된 명확한 프로그램 요청은 실행할 수 있습니다.
+Linux에서는 Docker socket 그룹을 `.env`의 `DOCKER_GID`에 설정합니다.
+공유 프로그램은 Worker가 별도 볼륨에 clone하므로 사용만 할 때는 `agent-tools`를 수동 clone하지 않아도 됩니다.
+두 저장소가 공개되기 전에는 GitHub 읽기 인증이 필요합니다. 소스를 편집할 때만 메인 폴더 옆에 별도로 clone합니다.
 
-`init-env`는 기존 `.env`를 덮어쓰지 않고 별도 사용자/관리자 키, DB 비밀번호, Job 암호화 키,
-프롬프트 HMAC 키를 무작위로 만듭니다. `.env`는 Git에서 제외됩니다.
+설정 화면은 [http://localhost:8000](http://localhost:8000/)입니다. 개인 PC에서 로컬 API·DB·Worker가
+실행되며 중앙 운영 서버를 사용하지 않습니다. PostgreSQL과 Docker 설치 없이 동작하는 단일 실행 파일은 아닙니다.
+`--local`은 무작위 비밀값을 만들고 로컬 관리자·로컬 릴리스를 켜며 자동 push는 끕니다. 기존 `.env`는 덮어쓰지 않습니다.
+
+Codex에는 STDIO 서버로 등록합니다. 아래 경로를 실제 설치 폴더로 바꾸세요.
+`uv run foundry mcp-config`로 현재 설치 경로가 반영된 설정을 출력할 수 있습니다.
+
+```toml
+[mcp_servers.agent_foundry]
+command = "docker"
+args = ["compose", "--project-directory", "C:/work/agent-foundry", "-f", "C:/work/agent-foundry/docker-compose.yml", "exec", "-T", "api", "foundry-mcp"]
+startup_timeout_sec = 30
+tool_timeout_sec = 60
+```
+
+Linux/macOS도 같은 형식이며 절대 경로만 다릅니다. 신뢰된 프로젝트의 `.codex/config.toml` 또는
+사용자 `~/.codex/config.toml`에 추가하고 MCP 연결을 다시 시작합니다. API 키를 이 설정에 넣지 않습니다.
+MCP 도구는 검색·실행·설치·생성 검토·상태 조회·카탈로그 동기화 여섯 개입니다. 모든 프로그램 정의를 AI에 전달하지 않습니다.
+
+처음에는 계산기부터 사용할 수 있습니다. AI에 “Foundry로 0.1 + 0.2를 계산해줘”라고 요청해 연결을 확인하세요.
+웹 설정에서 개인 API 키와 네 역할의 모델을 지정합니다. MCP 요청 처리는 Main·Router를 생략하지만, 백그라운드 중복 판별은 Router를 사용할 수 있습니다.
+이 연결은 모든 대화를 자동 감시하지 않습니다. 프로젝트 규칙과 답변 후 검토 흐름은
+[로컬 MCP 사용 가이드](LOCAL_MCP.md#5-제공-도구-및-사용-규칙)에 설명했습니다.
 
 ## 웹 워크스페이스
 
@@ -113,7 +143,7 @@ Builder는 생성 작업의 사용량을 별도로 집계한 뒤 커밋 전에 �
 `foundry tool-tokens <프로그램폴더> --add <해당수정의실제사용토큰>`으로 최종값을 갱신한 뒤 코드와 함께 커밋합니다.
 최초 생성에만 `--initial`을 사용하며 기존 파일은 덮어쓰지 않습니다. 명령은 저장소 작업자가 단독으로 한 번 실행합니다.
 일부 사용량이나 과거 생성 기록이 없으면 파일에 `미집계` 한 줄을 유지하며 화면에도 미집계로 표시합니다.
-사용자 요청에 따라 이 세션에서 만든 CSV 통계·기록 저장·HRMS는 Python 앱·테스트의 UTF-8 바이트 수 ÷ 4 올림값을 초기 환산 기준으로 사용합니다. manifest의 generation_tokens_estimated=true로 구분하고 생성 N 토큰으로 표시하며, 실제 세션 사용량을 뜻하지 않습니다. 설치·복구·GitHub 목록 동기화 시 해당 commit의 파일을 DB에 반영하므로 다른 서버에도 최종값이 전달됩니다.
+초기 직접 작성 예제인 CSV 통계·기록 저장·HRMS는 Python 앱·테스트의 UTF-8 바이트 수 ÷ 4 올림값을 초기 환산 기준으로 사용합니다. manifest의 generation_tokens_estimated=true로 구분하고 생성 N 토큰으로 표시하며, 실제 세션 사용량을 뜻하지 않습니다. 설치·복구·GitHub 목록 동기화 시 해당 commit의 파일을 DB에 반영하므로 다른 서버에도 최종값이 전달됩니다.
 
 공유 저장소의 `tools/hrms`는 직원 등록·조회, 부서 인원, 연도별 연차 잔여량과 중복 방지 휴가 기록을 처리합니다.
 예를 들어 `HRMS 직원 DEMO001 조회`, `HRMS 연차 DEMO001 2026 잔여`, `HRMS 인사 요약`을 입력합니다.
@@ -166,10 +196,10 @@ JSON 응답 형식을, 호환 API는 JSON object 형식을 요청합니다. 불�
 
 로컬에서 로그인 없이 모든 관리자 기능을 쓰려면 `.env`에 `FOUNDRY_LOCAL_ADMIN=true`를 설정하고
 API를 다시 시작합니다. `localhost`, `127.0.0.1`, `::1` 주소에서는 웹·API에 접속 키가 필요 없으며
-화면에 **로컬 관리자**로 표시합니다. 현재 로컬 설치에는 이 모드를 적용했습니다.
+화면에 **로컬 관리자**로 표시합니다. `init-env --local`은 이 모드로 초기화합니다.
 Compose의 `127.0.0.1` 포트 바인딩을 유지합니다. 다른 웹사이트에서 보낸 브라우저 요청은 거부합니다.
 외부 운영으로 전환할 때는 `FOUNDRY_LOCAL_ADMIN=false`로 바꾸면 기존 인증을 다시 사용합니다.
-새 설치의 기본값은 `false`입니다.
+`--local` 없이 초기화하면 기본값은 `false`입니다.
 
 인증 모드에서는 최초 접속에 `.env`의 `FOUNDRY_ADMIN_KEY`를 워크스페이스 접속 키로 사용합니다.
 `FOUNDRY_API_KEY`로 접속한 일반 사용자는 공개 프로그램과 프롬프트만 사용합니다.
@@ -293,8 +323,8 @@ Private 저장소는 각 서버에 읽기 credential이 필요합니다. 자동 
 `.worker.env`에 `FOUNDRY_GIT_TOKEN`을 저장하면 Worker에만 전달됩니다. 파일 권한은 0600으로
 제한하고 Git과 Docker build context에서 제외합니다. Git helper는 설정된 저장소의 HTTPS
 호스트와 경로가 모두 일치할 때만 인증을 제공합니다. 선택적 env 파일 기능은 Compose 2.24+
-버전이 필요합니다. Push가 실패한
-local commit은 공유 카탈로그에 나타나지 않으며 활성 배포로 등록하지 않습니다.
+버전이 필요합니다. 공유 모드에서 push가 실패한 commit은 활성화하지 않습니다.
+명시적인 로컬 모드는 push 없이 검증한 commit을 활성화하지만 공유 카탈로그에는 올리지 않습니다.
 
 ### 설치·호출·토큰 통계
 
@@ -334,7 +364,7 @@ uv run foundry deploy tools/csv-statistics <40-character-agent-tools-commit>
 ```
 
 문법 검사 → dependency 설치(있을 경우) → pytest → 예시 입출력 schema/expected 값 검사 →
-독립 컨테이너에서 예시 반복 실행 → Git commit/push → 원격 commit 재조회 → 배포/검증 → ACTIVE
+독립 컨테이너에서 예시 반복 실행 → Git commit(공유 모드는 push) → 고정 commit 재조회 → 배포/검증 → ACTIVE
 순서를 지킵니다. 첫 검증 전에 이미지를 구성하지만 검증되지 않은 Tool은 사용자 실행 대상으로
 등록되지 않습니다. 프로세스 도구의 health check는 실제 CLI 예시 실행입니다.
 
@@ -378,8 +408,10 @@ Git으로 복구되지 않으므로 별도의 DB/파일 백업이 필요합니�
 
 이전 stable release의 manifest와 테스트 증거를 보존합니다. 실패한 배포는 Registry의 기존
 버전 포인터를 바꾸지 않습니다. rollback은 이전 commit을 다시 테스트한 다음 포인터를 바꿉니다.
-Push 실패로 로컬 commit만 남으면 활성화하지 않습니다. Git 문제를 해결해 해당 commit을 push한 뒤
+공유 모드에서 push 실패로 로컬 commit만 남으면 활성화하지 않습니다. Git 문제를 해결해 해당 commit을 push한 뒤
 `foundry deploy tools/<name> <commit>`으로 재개할 수 있습니다. 기존 dirty checkout은 거부합니다.
+로컬 모드의 미공유 commit은 복구 시 `tools-checkout` 볼륨도 필요합니다. 코드 공유와 로컬 사용의 차이는
+[로컬 MCP 가이드](LOCAL_MCP.md#7-로컬-보관과-github-공유)를 참고하세요.
 
 ### 중앙 DB와 프로그램별 스키마
 
@@ -453,3 +485,8 @@ fetcher가 아닙니다. 다중 테넌트 분리, 엄격한 외부 egress gatewa
 - [OpenAI 호환 호출의 기준인 Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
 - [PostgreSQL row locking / SKIP LOCKED](https://www.postgresql.org/docs/current/sql-select.html)
 - [Docker 실행 및 자원 제한](https://docs.docker.com/engine/containers/run/)
+
+## 라이선스
+
+[MIT](LICENSE). 개인·상업적 사용 및 수정·재배포가 가능하며 저작권·라이선스 고지를 유지해야 합니다.
+의존 패키지, AI 서비스, 외부 자료의 권리와 약관은 별도로 적용됩니다.

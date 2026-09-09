@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     evaluation_delay_seconds: float = Field(2, ge=0, le=60)
     builder_enabled: bool = True
     main_build_spec_enabled: bool = True
+    local_releases_enabled: bool = False
+    mcp_output_max_chars: int = Field(20000, ge=1000, le=100000)
     auto_extension_enabled: bool = True
     build_context_max_chars: int = Field(6000, ge=500, le=20000)
     extension_source_max_chars: int = Field(60000, ge=5000, le=300000)

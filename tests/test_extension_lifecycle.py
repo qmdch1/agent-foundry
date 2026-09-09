@@ -12,10 +12,12 @@ pytestmark = [pytest.mark.integration, pytest.mark.docker]
 
 
 @pytest.mark.usefixtures("database_network")
-async def test_builder_extension_preserves_data_tests_and_cumulative_usage(container, tmp_path):
+@pytest.mark.parametrize("publish", [True, False])
+async def test_builder_extension_preserves_data_tests_and_cumulative_usage(container, tmp_path, publish):
     settings, commands = container.settings, container.commands
     settings.auto_extension_enabled = True
-    settings.git_push = True
+    settings.git_push = publish
+    settings.local_releases_enabled = not publish
     settings.tool_repository = str(tmp_path / "extension.git")
     root = settings.tool_repository_root
     await commands.run(["git", "init", "--bare", "--initial-branch=main", settings.tool_repository])
@@ -112,7 +114,10 @@ def test_new_read_does_not_insert():
     assert published_manifest.examples == manifest.examples
     assert published_manifest.generation_tokens_estimated
     remote_commit = (await commands.run(["git", "ls-remote", "origin", "refs/heads/main"], cwd=root)).decode()
-    assert remote_commit.startswith(result["git_commit"])
+    assert remote_commit.startswith(result["git_commit"] if publish else original_commit)
+    assert result["published"] is publish
+    if not publish:
+        assert all(r["success"] for r in await container.deployment.reconcile())
 
     after = await container.registry.get(manifest.program_id)
     assert after["creation_tokens"] == 200
