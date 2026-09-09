@@ -8,6 +8,7 @@ from .generation_tokens import read_total
 from .models import Manifest
 from .program_databases import ProgramDatabases
 from .security import PolicyError, safe_path
+from .timing import stage
 
 
 class Deployment:
@@ -15,6 +16,7 @@ class Deployment:
         self.registry, self.sandbox, self.commands, self.settings = registry, sandbox, commands, settings
         self.databases = ProgramDatabases(registry.db, settings)
         self.sandbox.databases = self.databases
+        self.sandbox.db = registry.db
 
     async def checkout(self, repository, commit, repository_path):
         if repository != self.settings.tool_repository or not re.fullmatch(r"[0-9a-f]{40}", commit):
@@ -53,10 +55,21 @@ class Deployment:
         return await self.databases.ensure(manifest, commit)
 
     async def deploy(self, manifest, directory, commit, *, activate=True):
+        async with stage(
+            self.registry.db, "deployment", program_id=str(manifest.program_id), git_commit=commit
+        ):
+            return await self._deploy(manifest, directory, commit, activate=activate)
+
+    async def _deploy(self, manifest, directory, commit, *, activate=True):
         creation_tokens = read_total(directory)
         image = await self.sandbox.build(directory, manifest)
         evidence = await self.sandbox.validate(image, manifest)
-        await self.apply_tables(manifest, commit)
+        # Disposable test evidence can be reused. Migrations and live binding health
+        # must always execute, including cache hits, reconciliation and rollback.
+        async with stage(
+            self.registry.db, "migration_health", program_id=str(manifest.program_id), git_commit=commit
+        ):
+            await self.apply_tables(manifest, commit)
         receipt = {
             "image": image,
             "git_commit": commit,

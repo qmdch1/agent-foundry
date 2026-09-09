@@ -2,6 +2,8 @@ import asyncio
 import contextlib
 import time
 
+from .timing import stage
+
 
 class Worker:
     def __init__(self, queue, evaluator, builder, deployment, settings, catalog=None):
@@ -10,7 +12,7 @@ class Worker:
         self.catalog = catalog
 
     async def process(self, job):
-        async def dispatch():
+        async def dispatch_inner():
             payload = self.queue.payload(job)
             if job["kind"] == "EVALUATE":
                 return await self.evaluator.evaluate(payload)
@@ -32,6 +34,12 @@ class Worker:
                 await self.deployment.rollback(payload["program_id"], payload["commit"])
                 return "SUCCEEDED", {"program_id": payload["program_id"], "git_commit": payload["commit"]}
             raise ValueError("Unknown job kind")
+
+        async def dispatch():
+            async with stage(self.queue.db, "job", job_id=str(job["id"]), kind=job["kind"]) as details:
+                result = await dispatch_inner()
+                details["status"] = result[0]
+                return result
 
         async def renew():
             while True:

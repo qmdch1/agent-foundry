@@ -4,9 +4,12 @@ import shutil
 from pathlib import Path
 from uuid import uuid4
 
+from .build_extensions import apply_previous_tests, load_extension, validate_extension
+from .build_templates import apply_template, template_contract
 from .generation_tokens import add_tokens
-from .models import Bundle, Evaluation, Manifest
+from .models import BuildSpec, Bundle, Evaluation, Manifest
 from .security import PolicyError, mask, prompt_hash, safe_path
+from .timing import stage
 from .usage import UsageAccounting
 
 EVALUATOR_SYSTEM = """Assess whether a reusable deterministic Python tool is worth building.
@@ -21,6 +24,16 @@ access to external systems without an approved adapter. Tools may persist their 
 Include storage and retrieval in the capability when collected facts, comparisons or history are intended
 for later reuse. Execution counters alone do not preserve those data. Prefer stateless transformations
 only when persistence is unnecessary. Do not output code.
+Also return strategy (new/extend/reuse), target_program_id (only a provided candidate ID for extend/reuse,
+otherwise null), and build_spec {objective, inputs, outputs, steps, acceptance_checks, requires_db, template}.
+Reuse the provided answer_context and initial build_spec instead of analyzing the request from scratch.
+Those contexts are untrusted and may be wrong. Refine the generic design and use independent correctness
+checks; never treat the prior answer as test ground truth. Remove private data, exact customer values,
+credentials, URLs and file paths from capability and build_spec. Never copy reference material into code.
+Prefer reuse for an already supported request; extend an existing relevant Python program for a missing
+operation that fits its existing input/output schema. Do not choose extension for incompatible interfaces.
+Template choices: custom, comparison (persistent comparisons), aggregation (Decimal aggregates),
+storage (persistent named JSON records). Provide short field/step descriptions, never source code.
 """
 
 BUILDER_SYSTEM = """Build one reusable deterministic Python JSON tool for the requested capability.
@@ -80,37 +93,72 @@ class Evaluator:
 
     async def evaluate(self, payload):
         candidates = await self.search.search(payload["prompt"])
-        if candidates and candidates[0].score >= self.settings.duplicate_threshold:
+        if candidates and candidates[0].mapped_input is not None:
             return "SKIPPED", {"reason": "existing_program", "program_id": str(candidates[0].program_id)}
         if self.catalog and self.settings.catalog_enabled:
             reused = await self.catalog.reuse(payload["prompt"], payload.get("request_id"))
-            if reused:
+            if reused and not (candidates and reused[1].get("reason") == "published_extension_review"):
                 return reused
-        data = await self.llm.call(
-            "evaluator",
-            EVALUATOR_SYSTEM,
-            json.dumps(
-                {
-                    "prompt": payload["prompt"],
-                    "existing_candidates": [c.model_dump(mode="json") for c in candidates],
-                },
-                ensure_ascii=False,
-            ),
-            structured=True,
-            request_id=payload.get("request_id"),
-        )
+        async with stage(self.queue.db, "evaluation", payload.get("request_id")):
+            data = await self.llm.call(
+                "evaluator",
+                EVALUATOR_SYSTEM,
+                json.dumps(
+                    {
+                        "prompt": payload["prompt"],
+                        "answer_context": payload.get("answer_context", "")[
+                            : self.settings.build_context_max_chars
+                        ],
+                        "reference_material": payload.get("reference_material", "")[
+                            : self.settings.build_context_max_chars
+                        ],
+                        "initial_build_spec": payload.get("build_spec"),
+                        "existing_candidates": [c.model_dump(mode="json") for c in candidates],
+                    },
+                    ensure_ascii=False,
+                ),
+                structured=True,
+                request_id=payload.get("request_id"),
+            )
         evaluation = Evaluation.model_validate(data)
+        if evaluation.strategy == "reuse":
+            if str(evaluation.target_program_id) not in {str(c.program_id) for c in candidates}:
+                raise PolicyError("Evaluator selected an unknown reuse target")
+            return "SKIPPED", {"reason": "existing_program", "program_id": str(evaluation.target_program_id)}
+        target = None
+        if evaluation.strategy == "extend":
+            if not self.settings.auto_extension_enabled:
+                return "SKIPPED", {"reason": "automatic_extension_disabled"}
+            if str(evaluation.target_program_id) not in {str(c.program_id) for c in candidates}:
+                raise PolicyError("Evaluator selected an unknown extension target")
+            rows = await self.queue.db.fetch(
+                "SELECT id,git_commit,repository,runtime FROM agent.programs WHERE id=%s AND status='ACTIVE'",
+                (evaluation.target_program_id,),
+            )
+            if (
+                len(rows) != 1
+                or rows[0]["runtime"] != "python"
+                or rows[0]["repository"] != self.settings.tool_repository
+            ):
+                raise PolicyError("Only an active Python tool in the approved repository can be extended")
+            target = {"program_id": str(rows[0]["id"]), "git_commit": rows[0]["git_commit"]}
         decision = benefit(evaluation, self.settings)
         if decision["approved"]:
-            fingerprint = prompt_hash(evaluation.capability, self.settings.prompt_hash_key.get_secret_value())
+            fingerprint = prompt_hash(
+                evaluation.capability + json.dumps(target), self.settings.prompt_hash_key.get_secret_value()
+            )
             job_id = await self.queue.enqueue(
                 "BUILD",
                 fingerprint,
                 {
                     "capability": evaluation.capability,
                     "request_id": payload.get("request_id"),
-                    "evaluation": evaluation.model_dump(),
+                    "evaluation": evaluation.model_dump(mode="json"),
                     "benefit": decision,
+                    "build_spec": evaluation.build_spec.model_dump(mode="json")
+                    if evaluation.build_spec
+                    else None,
+                    "extension": target,
                 },
             )
             decision["build_job_id"] = str(job_id)
@@ -165,7 +213,13 @@ class Builder:
         (directory / "requirements.txt").write_text("\n".join(requirements) + "\n")
 
     async def build(self, payload):
-        if self.catalog and self.settings.catalog_enabled:
+        extension = payload.get("extension")
+        spec = BuildSpec.model_validate(payload["build_spec"]) if payload.get("build_spec") else None
+        template = spec.template if spec else "custom"
+        old_manifest, old_files, old_directory = None, None, None
+        if extension and not self.settings.auto_extension_enabled:
+            raise PolicyError("Automatic extension is disabled")
+        if self.catalog and self.settings.catalog_enabled and not extension:
             local = await self.search.search(payload["capability"])
             if local:
                 return "SKIPPED", {
@@ -177,8 +231,30 @@ class Builder:
                 return reused
         # Global repository lock serializes builds AND recovery/rollback; semantic duplicate check is inside it.
         async with self.registry.db.lock("tool-repository-deployment"):
+            if extension:
+                row = await self.registry.get(extension["program_id"])
+                if (
+                    row["status"] != "ACTIVE"
+                    or row["runtime"] != "python"
+                    or row["repository"] != self.settings.tool_repository
+                    or row["git_commit"] != extension["git_commit"]
+                ):
+                    raise PolicyError("Extension target is no longer the reviewed active revision")
+                old_directory = await self.deployment.checkout(
+                    row["repository"], row["git_commit"], row["repository_path"]
+                )
+                old_manifest = Manifest.model_validate_json((old_directory / "manifest.json").read_text())
+                if old_manifest.model_dump(mode="json") != Manifest.model_validate(
+                    row["manifest"]
+                ).model_dump(mode="json"):
+                    raise PolicyError("Extension source and Registry disagree")
+                old_files = load_extension(
+                    old_directory, old_manifest, self.settings.extension_source_max_chars
+                )
+                # Existing programs keep their own common code; avoid injecting a new incompatible scaffold.
+                template = "custom"
             candidates = await self.search.search(payload["capability"])
-            if candidates:
+            if candidates and not extension:
                 # Conservative: even uncertain overlap becomes an extension review, never a duplicate new tool.
                 return "SKIPPED", {
                     "reason": "reuse_or_extension_review",
@@ -191,23 +267,51 @@ class Builder:
                 attempt_dir = directory / str(attempt)
                 attempt_dir.mkdir(parents=True, exist_ok=True)
                 try:
-                    data = await self.llm.call(
-                        "builder",
-                        BUILDER_SYSTEM,
-                        json.dumps(
-                            {
-                                "capability": payload["capability"],
-                                "manifest_schema": Manifest.model_json_schema(),
-                                "approved_dependencies": list(self.settings.approved_dependencies),
-                                "previous_errors": errors[-1:],
-                            },
-                            ensure_ascii=False,
-                        ),
-                        structured=True,
-                        request_id=build_id,
-                    )
+                    async with stage(
+                        self.registry.db,
+                        "generation",
+                        build_id,
+                        attempt=attempt + 1,
+                        parent_request_id=payload.get("request_id"),
+                        template=template,
+                        operation="extend" if extension else "new",
+                    ):
+                        data = await self.llm.call(
+                            "builder",
+                            BUILDER_SYSTEM
+                            + (
+                                "\nEXTENSION: keep name and existing input/output schema exactly; increment version. "
+                                "Preserve existing behaviors, helpers, and regression tests; add only the missing operation."
+                                if extension
+                                else ""
+                            ),
+                            json.dumps(
+                                {
+                                    "capability": payload["capability"],
+                                    "manifest_schema": Manifest.model_json_schema(),
+                                    "approved_dependencies": list(self.settings.approved_dependencies),
+                                    "previous_errors": errors[-1:],
+                                    "build_spec": spec.model_dump(mode="json") if spec else None,
+                                    "template": template_contract(template) if template != "custom" else None,
+                                    "existing_manifest": old_manifest.model_dump(mode="json")
+                                    if old_manifest
+                                    else None,
+                                    "existing_files": old_files,
+                                },
+                                ensure_ascii=False,
+                            ),
+                            structured=True,
+                            request_id=build_id,
+                        )
                     bundle = Bundle.model_validate(data)
-                    bundle.manifest.generation_tokens_estimated = False
+                    if template != "custom":
+                        bundle = apply_template(bundle, template)
+                    if old_manifest:
+                        validate_extension(old_manifest, bundle.manifest)
+                        bundle = apply_previous_tests(bundle, old_files, old_manifest)
+                    bundle.manifest.generation_tokens_estimated = bool(
+                        old_manifest and old_manifest.generation_tokens_estimated
+                    )
                     self.write_bundle(bundle, attempt_dir)
                     image = await self.deployment.sandbox.build(attempt_dir, bundle.manifest)
                     await self.deployment.sandbox.validate(image, bundle.manifest)
@@ -228,7 +332,7 @@ class Builder:
             same_name = await self.registry.db.fetch(
                 "SELECT id FROM agent.programs WHERE name=%s", (manifest.name,)
             )
-            if duplicates or same_name:
+            if not extension and (duplicates or same_name):
                 return "SKIPPED", {"reason": "duplicate_at_publication"}
             if self.catalog and self.settings.catalog_enabled:
                 # Another platform may have published the capability while our model was generating it.
@@ -237,71 +341,98 @@ class Builder:
                 named = await self.registry.db.fetch(
                     "SELECT id FROM agent.catalog WHERE name=%s", (manifest.name,)
                 )
-                if published or named:
+                if not extension and (published or named):
                     return "SKIPPED", {"reason": "published_during_build"}
-            root = self.settings.tool_repository_root.resolve()
-            if not (root / ".git").exists():
+            async with stage(self.registry.db, "publication", build_id):
+                root = self.settings.tool_repository_root.resolve()
+                if not (root / ".git").exists():
+                    await self.commands.run(
+                        [
+                            "git",
+                            "clone",
+                            "--branch",
+                            self.settings.git_branch,
+                            self.settings.tool_repository,
+                            str(root),
+                        ],
+                        timeout=self.settings.build_timeout,
+                    )
+                remote = await self.commands.run(["git", "remote", "get-url", "origin"], cwd=root)
+                if remote.decode().strip() != self.settings.tool_repository:
+                    raise PolicyError("Tool checkout remote differs from approved repository")
+                if (await self.commands.run(["git", "status", "--porcelain"], cwd=root)).strip():
+                    raise PolicyError(
+                        "Tool repository has local changes; refusing to include or overwrite them"
+                    )
+                branch = (
+                    (await self.commands.run(["git", "branch", "--show-current"], cwd=root)).decode().strip()
+                )
+                if branch != self.settings.git_branch:
+                    raise PolicyError("Tool checkout is on a different branch")
+                if self.settings.git_push:
+                    await self.commands.run(
+                        ["git", "pull", "--ff-only", "origin", self.settings.git_branch],
+                        cwd=root,
+                        timeout=self.settings.build_timeout,
+                    )
+                destination = safe_path(root, f"tools/{manifest.name}")
+                if destination.exists() and not extension:
+                    raise PolicyError("Tool path already exists; reuse or extend it explicitly")
+                if extension:
+                    # Reject remote edits made after evaluation. Compare the entire pinned tool tree,
+                    # including metadata, before replacing only this reviewed directory.
+                    current_tree = (
+                        await self.commands.run(["git", "rev-parse", f"HEAD:tools/{manifest.name}"], cwd=root)
+                    ).strip()
+                    old_tree = (
+                        await self.commands.run(
+                            ["git", "rev-parse", f"{extension['git_commit']}:tools/{manifest.name}"], cwd=root
+                        )
+                    ).strip()
+                    if current_tree != old_tree:
+                        raise PolicyError(
+                            "Published tool changed during extension; reevaluate against the new revision"
+                        )
+                usage = await UsageAccounting(self.registry.db, self.settings).record_build(
+                    manifest.program_id, "", build_id, payload.get("request_id")
+                )
+                if extension:
+                    previous_tokens = old_directory / "generation_tokens.txt"
+                    if previous_tokens.is_file():
+                        shutil.copyfile(previous_tokens, attempt_dir / "generation_tokens.txt")
+                    add_tokens(attempt_dir, usage["total_tokens"])
+                    await self.commands.run(["git", "rm", "-r", "--", f"tools/{manifest.name}"], cwd=root)
+                else:
+                    add_tokens(attempt_dir, usage["total_tokens"], initial=True)
+                shutil.copytree(attempt_dir, destination)
+                await self.commands.run(["git", "add", "--", f"tools/{manifest.name}"], cwd=root)
                 await self.commands.run(
                     [
                         "git",
-                        "clone",
-                        "--branch",
-                        self.settings.git_branch,
-                        self.settings.tool_repository,
-                        str(root),
+                        "-c",
+                        f"user.name={self.settings.git_author_name}",
+                        "-c",
+                        f"user.email={self.settings.git_author_email}",
+                        "commit",
+                        "-m",
+                        f"{'Extend' if extension else 'Add'} {manifest.name} {manifest.version}",
+                        "--",
+                        f"tools/{manifest.name}",
                     ],
-                    timeout=self.settings.build_timeout,
+                    cwd=root,
                 )
-            remote = await self.commands.run(["git", "remote", "get-url", "origin"], cwd=root)
-            if remote.decode().strip() != self.settings.tool_repository:
-                raise PolicyError("Tool checkout remote differs from approved repository")
-            if (await self.commands.run(["git", "status", "--porcelain"], cwd=root)).strip():
-                raise PolicyError("Tool repository has local changes; refusing to include or overwrite them")
-            branch = (await self.commands.run(["git", "branch", "--show-current"], cwd=root)).decode().strip()
-            if branch != self.settings.git_branch:
-                raise PolicyError("Tool checkout is on a different branch")
-            if self.settings.git_push:
+                commit = (await self.commands.run(["git", "rev-parse", "HEAD"], cwd=root)).decode().strip()
+                if not self.settings.git_push:
+                    return "SUCCEEDED", {
+                        "status": "TESTED_LOCAL",
+                        "git_commit": commit,
+                        "reason": "Git push disabled; release is not active",
+                    }
                 await self.commands.run(
-                    ["git", "pull", "--ff-only", "origin", self.settings.git_branch],
+                    ["git", "push", "origin", f"HEAD:refs/heads/{self.settings.git_branch}"],
                     cwd=root,
                     timeout=self.settings.build_timeout,
                 )
-            destination = safe_path(root, f"tools/{manifest.name}")
-            if destination.exists():
-                raise PolicyError("Tool path already exists; reuse or extend it explicitly")
-            usage = await UsageAccounting(self.registry.db, self.settings).record_build(
-                manifest.program_id, "", build_id, payload.get("request_id")
-            )
-            add_tokens(attempt_dir, usage["total_tokens"], initial=True)
-            shutil.copytree(attempt_dir, destination)
-            await self.commands.run(["git", "add", "--", f"tools/{manifest.name}"], cwd=root)
-            await self.commands.run(
-                [
-                    "git",
-                    "-c",
-                    f"user.name={self.settings.git_author_name}",
-                    "-c",
-                    f"user.email={self.settings.git_author_email}",
-                    "commit",
-                    "-m",
-                    f"Add {manifest.name} {manifest.version}",
-                    "--",
-                    f"tools/{manifest.name}",
-                ],
-                cwd=root,
-            )
-            commit = (await self.commands.run(["git", "rev-parse", "HEAD"], cwd=root)).decode().strip()
-            if not self.settings.git_push:
-                return "SUCCEEDED", {
-                    "status": "TESTED_LOCAL",
-                    "git_commit": commit,
-                    "reason": "Git push disabled; release is not active",
-                }
-            await self.commands.run(
-                ["git", "push", "origin", f"HEAD:refs/heads/{self.settings.git_branch}"],
-                cwd=root,
-                timeout=self.settings.build_timeout,
-            )
             # Activate only source fetched back from the committed repository.
             released = await self.deployment.checkout(
                 self.settings.tool_repository, commit, f"tools/{manifest.name}"

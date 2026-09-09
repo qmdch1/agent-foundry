@@ -8,11 +8,12 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 
+from .build_handoff import review_payload
 from .config import Settings
 from .console import console_router
 from .container import Container
-from .models import AgentRequest, StrictModel
-from .security import PolicyError
+from .models import AgentRequest, BuildSpec, StrictModel
+from .security import PolicyError, prompt_hash
 
 
 class ExecuteRequest(StrictModel):
@@ -22,6 +23,13 @@ class ExecuteRequest(StrictModel):
 class RollbackRequest(StrictModel):
     program_id: UUID
     commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+
+
+class BuildReviewRequest(StrictModel):
+    prompt: str = Field(min_length=1, max_length=12000)
+    answer: str = Field(default="", max_length=50000)
+    reference_material: str = Field(default="", max_length=20000)
+    build_spec: BuildSpec | None = None
 
 
 def create_app(settings=None, container=None):
@@ -109,6 +117,26 @@ def create_app(settings=None, container=None):
             raise HTTPException(422, "Invalid query length")
         searcher = services.catalog.search if source == "github" else services.search
         return [c.model_dump(mode="json") for c in await searcher.search(q)]
+
+    @app.post("/v1/build-reviews", status_code=202, dependencies=[Depends(user_auth)])
+    async def build_review(request: BuildReviewRequest):
+        """An external assistant submits context after delivering its own answer."""
+        if not settings.builder_enabled:
+            raise HTTPException(409, "Builder is disabled")
+        request_id = uuid4()
+        payload = review_payload(
+            request.prompt,
+            request.answer,
+            request.build_spec,
+            request_id,
+            settings.build_context_max_chars,
+            request.reference_material,
+        )
+        fingerprint = prompt_hash(request.prompt, settings.prompt_hash_key.get_secret_value())
+        job_id = await services.queue.enqueue(
+            "EVALUATE", fingerprint, payload, delay=settings.evaluation_delay_seconds
+        )
+        return {"request_id": str(request_id), "evaluation_job_id": str(job_id), "status": "queued"}
 
     @app.get("/admin/jobs/{job_id}", dependencies=[Depends(admin_auth)])
     async def job(job_id: UUID):

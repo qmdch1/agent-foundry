@@ -3,6 +3,7 @@
 .worker.env
 .env.*
 .state
+.tmp
 .venv
 __pycache__
 .pytest_cache

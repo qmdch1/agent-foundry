@@ -82,6 +82,27 @@ async def test_user_cannot_change_settings_or_view_internal_programs(container):
         assert programs and all(p["visibility"] == "public" for p in programs)
 
 
+async def test_build_metrics_are_aggregated_and_admin_only(container):
+    for duration, hit in [(100, False), (20, True)]:
+        await container.db.event(
+            "pipeline_stage",
+            {
+                "stage": "validation",
+                "duration_ms": duration,
+                "success": True,
+                "cache_hit": hit,
+            },
+        )
+    async with client_for(container) as client:
+        await sign_in(client, "test-user")
+        assert (await client.get("/ui/build-metrics")).status_code == 403
+        await sign_in(client)
+        rows = (await client.get("/ui/build-metrics")).json()
+        row = next(r for r in rows if r["stage"] == "validation")
+        assert row["runs"] == 2 and row["successes"] == 2 and row["cache_hits"] == 1
+        assert float(row["avg_duration_ms"]) == 60
+
+
 async def test_single_use_launch_and_logout_revocation(container):
     token = await container.web_sessions.create_launch()
     async with client_for(container) as client:

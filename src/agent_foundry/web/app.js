@@ -280,7 +280,13 @@ async function boot(){
 const jobLabels={EVALUATE:"공유 프로그램 확인·재사용 평가",DISCOVER:"공유 프로그램 검색",BUILD:"프로그램 생성·배포",INSTALL:"공유 프로그램 설치",CATALOG_SYNC:"GitHub 목록 동기화",RECONCILE:"프로그램 복구",ROLLBACK:"이전 버전 복구"};
 const statusLabels={PENDING:"대기",RUNNING:"진행 중",SUCCEEDED:"완료",SKIPPED:"재사용 검토 / 종료",FAILED:"실패"};
 async function loadActivity(){
-  try{const jobs=await api("/ui/activity");$("#activity-list").innerHTML=jobs.length?jobs.map(j=>`<div class="activity-row"><span>${esc(jobLabels[j.kind]||j.kind)}</span><span class="badge ${j.status==="SUCCEEDED"?"active":j.status==="FAILED"?"disabled":"internal"}">${esc(statusLabels[j.status]||j.status)}</span><time>${new Date(j.created_at).toLocaleString("ko-KR")}</time></div>`).join(""):'<p class="muted">아직 별도 에이전트 작업이 없습니다.</p>';}catch(e){toast(e.message,true);}
+  try{
+    const [jobs,metrics]=await Promise.all([api("/ui/activity"),api("/ui/build-metrics")]);
+    const labels={evaluation:"재사용 평가",generation:"코드 생성",image_build:"실행 환경 준비",validation:"테스트",migration_health:"DB 적용·연결 확인",deployment:"배포",publication:"Git 저장·공유",job:"전체 작업"};
+    let content=jobs.length?jobs.map(j=>`<div class="activity-row"><span>${esc(jobLabels[j.kind]||j.kind)}</span><span class="badge ${j.status==="SUCCEEDED"?"active":j.status==="FAILED"?"disabled":"internal"}">${esc(statusLabels[j.status]||j.status)}</span><time>${new Date(j.created_at).toLocaleString("ko-KR")}</time></div>`).join(""):'<p class="muted">아직 별도 에이전트 작업이 없습니다.</p>';
+    if(metrics.length) content+='<h3>최근 7일 단계별 평균 시간</h3><p class="field-help">각 단계는 서로 포함될 수 있어 시간을 합산하지 않습니다.</p>'+metrics.map(m=>`<div class="activity-row"><span>${esc(labels[m.stage]||m.stage)}</span><span>${(Number(m.avg_duration_ms)/1000).toFixed(2)}초 · ${Number(m.runs)}회</span><span>성공 ${Number(m.successes)} · 재사용 ${Number(m.cache_hits)}</span></div>`).join("");
+    if($("#activity-list").innerHTML!==content) $("#activity-list").innerHTML=content;
+  }catch(e){toast(e.message,true);}
 }
 async function watchJob(id){
   for(let attempt=0;attempt<120;attempt++){

@@ -4,6 +4,7 @@
 !.env.example
 .venv/
 .state/
+.tmp/
 __pycache__/
 *.py[cod]
 .pytest_cache/

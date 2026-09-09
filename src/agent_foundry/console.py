@@ -187,6 +187,18 @@ def console_router(services):
             "SELECT id,kind,status,created_at,updated_at FROM agent.jobs ORDER BY created_at DESC LIMIT 12"
         )
 
+    @router.get("/ui/build-metrics", dependencies=[Depends(administrator)])
+    async def build_metrics():
+        return await db.fetch(
+            """SELECT data->>'stage' AS stage, count(*) AS runs,
+            count(*) FILTER (WHERE data->>'success'='true') AS successes,
+            count(*) FILTER (WHERE data->>'cache_hit'='true') AS cache_hits,
+            round(avg((data->>'duration_ms')::numeric),1) AS avg_duration_ms
+            FROM agent.events WHERE event_type='pipeline_stage'
+            AND created_at>now()-interval '7 days'
+            GROUP BY data->>'stage' ORDER BY stage"""
+        )
+
     @router.get("/ui/settings", dependencies=[Depends(administrator)])
     async def settings():
         return await profiles.public()

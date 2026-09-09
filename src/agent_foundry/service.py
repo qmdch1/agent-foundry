@@ -1,6 +1,7 @@
 import time
 from uuid import uuid4
 
+from .build_handoff import MAIN_HANDOFF_SYSTEM, review_payload, unpack_answer
 from .security import PolicyError, prompt_hash
 from .usage import UsageAccounting
 
@@ -31,6 +32,7 @@ class AgentService:
             request_id,
         )
         job_id, answer, result, installation_job = None, None, None, None
+        build_spec = None
         try:
             if plan.action == "execute":
                 result = await self.executor.plan(plan, request_id)
@@ -69,13 +71,23 @@ class AgentService:
                     answer = "GitHub 공유 저장소에서 필요한 프로그램을 찾았습니다. 별도 에이전트가 검증·설치 중입니다. 설치가 끝나면 같은 요청으로 실행할 수 있습니다."
                 else:
                     try:
+                        handoff = (
+                            request.allow_build
+                            and self.settings.builder_enabled
+                            and self.settings.main_build_spec_enabled
+                        )
                         answer = await self.llm.call(
                             "main",
-                            "Answer the user's request. Be clear about uncertainty. "
+                            MAIN_HANDOFF_SYSTEM
+                            if handoff
+                            else "Answer the user's request. Be clear about uncertainty. "
                             "You have no live tools in this call. Do not claim to have fetched live data or performed actions.",
                             request.prompt,
                             request_id=request_id,
+                            structured=handoff,
                         )
+                        if handoff:
+                            answer, build_spec = unpack_answer(answer)
                     except Exception:
                         if not self.catalog or not self.settings.catalog_enabled:
                             raise
@@ -92,7 +104,13 @@ class AgentService:
                     job_id = await self.queue.enqueue(
                         "EVALUATE",
                         fingerprint,
-                        {"prompt": request.prompt, "request_id": str(request_id)},
+                        review_payload(
+                            request.prompt,
+                            answer,
+                            build_spec,
+                            request_id,
+                            self.settings.build_context_max_chars,
+                        ),
                         delay=self.settings.evaluation_delay_seconds,
                     )
                 elif not installation_job and self.catalog and self.settings.catalog_enabled:
@@ -112,13 +130,17 @@ class AgentService:
                 {"success": True, "route": route, "duration_ms": (time.monotonic() - started) * 1000},
                 request_id,
             )
-            storage_events = await self.db.fetch(
-                "SELECT data->'storage' AS notice FROM agent.events "
-                "WHERE request_id=%s AND event_type='tool_execution' "
-                "AND data->>'success'='true' AND data->'storage' IS NOT NULL "
-                "ORDER BY created_at",
-                (request_id,),
-            ) if plan.programs else []
+            storage_events = (
+                await self.db.fetch(
+                    "SELECT data->'storage' AS notice FROM agent.events "
+                    "WHERE request_id=%s AND event_type='tool_execution' "
+                    "AND data->>'success'='true' AND data->'storage' IS NOT NULL "
+                    "ORDER BY created_at",
+                    (request_id,),
+                )
+                if plan.programs
+                else []
+            )
             return {
                 "request_id": str(request_id),
                 "route": route,

@@ -166,6 +166,25 @@ class Plan(StrictModel):
         return self
 
 
+class BuildSpec(StrictModel):
+    """Small, generic handoff, not copied customer examples or claimed ground truth."""
+
+    objective: str = Field(min_length=5, max_length=1000)
+    inputs: list[str] = Field(default_factory=list, max_length=12)
+    outputs: list[str] = Field(default_factory=list, max_length=12)
+    steps: list[str] = Field(default_factory=list, max_length=8)
+    acceptance_checks: list[str] = Field(default_factory=list, max_length=8)
+    requires_db: bool = False
+    template: Literal["custom", "comparison", "aggregation", "storage"] = "custom"
+
+    @field_validator("inputs", "outputs", "steps", "acceptance_checks")
+    @classmethod
+    def bounded_text(cls, values):
+        if any(not value.strip() or len(value) > 300 for value in values):
+            raise ValueError("Build spec entries must contain 1..300 characters")
+        return values
+
+
 class Evaluation(StrictModel):
     reuse_score: float = Field(ge=0, le=1)
     determinism_score: float = Field(ge=0, le=1)
@@ -177,6 +196,9 @@ class Evaluation(StrictModel):
     estimated_saved_tokens_per_use: int = Field(ge=0, le=1_000_000)
     capability: str = Field(min_length=5, max_length=1000)
     reason: str = Field(max_length=1000)
+    build_spec: BuildSpec | None = None
+    strategy: Literal["new", "extend", "reuse"] = "new"
+    target_program_id: UUID | None = None
 
 
 class Bundle(StrictModel):

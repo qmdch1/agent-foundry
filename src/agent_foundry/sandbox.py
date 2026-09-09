@@ -2,12 +2,17 @@ import hashlib
 import io
 import json
 import os
+import re
 import tarfile
+import tempfile
+import time
+from importlib.metadata import version
 from pathlib import Path
 from uuid import uuid4
 
 from .models import Manifest, validate_json
 from .security import PolicyError
+from .timing import stage
 
 WRAPPER = """import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location("generated_tool", "/tool/app/main.py")
@@ -23,6 +28,7 @@ print(json.dumps(result, allow_nan=False))
 
 class Sandbox:
     databases = None
+    db = None
 
     def __init__(self, commands, settings):
         self.commands, self.settings = commands, settings
@@ -37,6 +43,19 @@ class Sandbox:
         return data.getvalue()
 
     async def build(self, directory: Path, manifest: Manifest):
+        async with stage(self.db, "image_build", program_id=str(manifest.program_id)) as details:
+            return await self._build(directory, manifest, details)
+
+    async def inspect_image(self, name):
+        image = await self.commands.run(
+            [self.settings.docker_binary, "image", "inspect", name, "--format", "{{.Id}}"]
+        )
+        result = image.decode().strip()
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", result):
+            raise PolicyError("Docker returned an invalid immutable image ID")
+        return result
+
+    async def _build(self, directory, manifest, details):
         files = {}
         for p in directory.rglob("*"):
             if p.is_symlink():
@@ -47,8 +66,6 @@ class Sandbox:
             raise PolicyError("Tool source size limit exceeded")
         requirements = []
         for dependency in manifest.dependencies:
-            import re
-
             digest = self.settings.approved_dependencies.get(dependency)
             if (
                 not re.fullmatch(r"[a-zA-Z0-9_-]+==[0-9][a-zA-Z0-9.]*", dependency)
@@ -58,18 +75,37 @@ class Sandbox:
                 raise PolicyError("Dependency requires an approved version and wheel SHA256")
             requirements.append(f"{dependency} --hash=sha256:{digest}")
         files["requirements.txt"] = ("\n".join(requirements) + "\n").encode()
+        # Equivalent JSON formatting must not trigger a second build after Git publication.
+        files["manifest.json"] = json.dumps(
+            manifest.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        ).encode()
         files["_runner.py"] = WRAPPER.encode()
+        base_image = await self.inspect_image(self.settings.sandbox_image)
+        # BuildKit treats FROM sha256:<id> as a registry name, not a local image ID.
+        # Bind a content-derived local alias to the inspected immutable image instead.
+        base_tag = "foundry-base:" + base_image.removeprefix("sha256:")
+        await self.commands.run([self.settings.docker_binary, "image", "tag", base_image, base_tag])
         # The model never controls Docker instructions or host commands.
-        dockerfile = f"FROM {self.settings.sandbox_image}\nUSER 10001:10001\nWORKDIR /tool\n"
-        dockerfile += "COPY --chown=10001:10001 . /tool/\n"
+        dockerfile = f"FROM {base_tag}\nUSER 10001:10001\nWORKDIR /tool\n"
+        dockerfile += "COPY --chown=10001:10001 requirements.txt /tool/requirements.txt\n"
         if requirements:
             dockerfile += "RUN python -m pip install --user --no-cache-dir --only-binary=:all: --no-deps --require-hashes -r requirements.txt\n"
+        # Keep the installed dependency layer reusable when only Python source changes.
+        dockerfile += "COPY --chown=10001:10001 . /tool/\n"
         dockerfile += (
             'ENV PYTHONPATH=/tool PYTHONDONTWRITEBYTECODE=1\nENTRYPOINT ["python", "/tool/_runner.py"]\n'
         )
         files["Dockerfile"] = dockerfile.encode()
         archive = self.archive(files)
         tag = "foundry-tool:" + hashlib.sha256(archive).hexdigest()
+        try:
+            image = await self.inspect_image(tag)
+        except Exception:
+            image = None
+        if image:
+            details["cache_hit"] = True
+            return image
+        details["cache_hit"] = False
         await self.commands.run(
             [
                 self.settings.docker_binary,
@@ -83,10 +119,9 @@ class Sandbox:
             stdin=archive,
             timeout=self.settings.build_timeout,
         )
-        image = await self.commands.run(
-            [self.settings.docker_binary, "image", "inspect", tag, "--format", "{{.Id}}"]
-        )
-        return image.decode().strip()
+        if await self.inspect_image(base_tag) != base_image:
+            raise PolicyError("Sandbox base image changed during build")
+        return await self.inspect_image(tag)
 
     async def run(self, image, manifest, data=None, command=None, *, database_env=None):
         if not image.startswith("sha256:"):
@@ -164,6 +199,85 @@ class Sandbox:
                 pass
 
     async def validate(self, image, manifest):
+        async with stage(self.db, "validation", program_id=str(manifest.program_id)) as details:
+            return await self._validate_cached(image, manifest, details)
+
+    async def validation_key(self, image, manifest):
+        if await self.inspect_image(image) != image:
+            raise PolicyError("Validation image identity changed")
+        # The complete trusted validator/database provisioning code and installed schema
+        # libraries are part of policy, not just an easy-to-forget manual version.
+        source = Path(__file__).parent
+        policy = {
+            "image": image,
+            "base_image": await self.inspect_image(self.settings.sandbox_image),
+            "manifest": manifest.model_dump(mode="json"),
+            "implementation": {
+                name: hashlib.sha256((source / name).read_bytes()).hexdigest()
+                for name in ("sandbox.py", "models.py", "program_databases.py", "security.py")
+            },
+            "libraries": {name: version(name) for name in ("jsonschema", "pydantic", "psycopg")},
+            "settings": {
+                name: getattr(self.settings, name)
+                for name in (
+                    "validation_policy_version",
+                    "approved_dependencies",
+                    "memory_mb",
+                    "cpu",
+                    "execution_timeout",
+                    "max_output_bytes",
+                    "build_timeout",
+                    "docker_binary",
+                    "tool_database_network",
+                    "tool_database_host",
+                    "tool_database_port",
+                    "tool_database_connection_limit",
+                    "tool_database_statement_timeout_ms",
+                    "tool_database_lock_timeout_ms",
+                )
+            },
+        }
+        if manifest.requires_db and self.databases:
+            rows = await self.databases.db.fetch("SELECT current_setting('server_version_num') AS version")
+            policy["database_version"] = rows[0]["version"]
+        return hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest()
+
+    async def _validate_cached(self, image, manifest, details):
+        key = await self.validation_key(image, manifest)
+        cache_dir = self.settings.state_root / "validation-cache"
+        if cache_dir.is_symlink():
+            raise PolicyError("Validation cache cannot be a symlink")
+        cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        cache_path = cache_dir / (key + ".json")
+        enabled = self.settings.validation_cache_enabled and self.settings.validation_cache_ttl_seconds > 0
+        if enabled and cache_path.is_file() and not cache_path.is_symlink():
+            try:
+                entry = json.loads(cache_path.read_text())
+                age = time.time() - entry["validated_at"]
+                if (
+                    entry["key"] == key
+                    and entry["image"] == image
+                    and 0 <= age < self.settings.validation_cache_ttl_seconds
+                    and entry["evidence"]["passed"] is True
+                ):
+                    details["cache_hit"] = True
+                    return {**entry["evidence"], "validation_cache_hit": True}
+            except (ValueError, KeyError, TypeError, OSError):
+                pass
+        details["cache_hit"] = False
+        evidence = await self._validate(image, manifest)
+        if enabled:
+            # Only the trusted control plane writes here; generated source is never a
+            # cache authority and this directory is never mounted into tool containers.
+            with tempfile.NamedTemporaryFile(mode="w", dir=cache_dir, delete=False) as stream:
+                json.dump(
+                    {"key": key, "image": image, "validated_at": time.time(), "evidence": evidence}, stream
+                )
+                temporary = Path(stream.name)
+            temporary.replace(cache_path)
+        return {**evidence, "validation_cache_hit": False}
+
+    async def _validate(self, image, manifest):
         if not manifest.examples:
             raise PolicyError("At least one schema-validated example with expected output is required")
         await self.run(

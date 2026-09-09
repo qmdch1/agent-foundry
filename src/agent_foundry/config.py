@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     queue_poll_seconds: float = Field(1, ge=0.1, le=60)
     evaluation_delay_seconds: float = Field(2, ge=0, le=60)
     builder_enabled: bool = True
+    main_build_spec_enabled: bool = True
+    auto_extension_enabled: bool = True
+    build_context_max_chars: int = Field(6000, ge=500, le=20000)
+    extension_source_max_chars: int = Field(60000, ge=5000, le=300000)
+    validation_cache_enabled: bool = True
+    validation_cache_ttl_seconds: int = Field(86400, ge=0, le=2592000)
+    validation_policy_version: str = "1"
     catalog_enabled: bool = True
     catalog_sync_seconds: int = Field(60, ge=10, le=86400)
     catalog_max_programs: int = Field(10000, ge=1, le=100000)
