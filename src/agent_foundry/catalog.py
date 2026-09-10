@@ -1,4 +1,7 @@
+import asyncio
+import json
 import re
+import time
 from pathlib import Path
 
 from psycopg.types.json import Jsonb
@@ -6,7 +9,7 @@ from psycopg.types.json import Jsonb
 from .generation_tokens import FILENAME, parse_total
 from .models import Manifest
 from .search import ProgramSearch
-from .security import PolicyError
+from .security import PolicyError, prompt_hash
 
 
 class Catalog:
@@ -16,8 +19,20 @@ class Catalog:
         self.db, self.commands, self.deployment = db, commands, deployment
         self.router, self.settings = router, settings
         self.search = ProgramSearch(db, settings, catalog=True)
+        self._sync_lock = asyncio.Lock()
+        self._synced_at = 0.0
+        self._sync_result = None
 
     async def sync(self):
+        requested_at = time.monotonic()
+        async with self._sync_lock:
+            if self._synced_at > requested_at:
+                return self._sync_result
+            result = await self._sync()
+            self._sync_result, self._synced_at = result, time.monotonic()
+            return result
+
+    async def _sync(self):
         if not self.settings.catalog_enabled:
             return {"disabled": True}
         async with self.db.lock("catalog-sync"):
@@ -204,13 +219,20 @@ class Catalog:
                 results.append({"program_id": ref["id"], "git_commit": ref["git_commit"], "status": "ACTIVE"})
         return "SUCCEEDED", {"programs": results}
 
-    async def reuse(self, prompt, request_id=None):
+    async def reuse(self, prompt, request_id=None, *, queue=None):
         """Worker-only fresh Git check before evaluating or generating anything."""
         await self.sync()
         candidates = await self.search.search(prompt)
         plan, _ = await self.router.route(prompt, candidates, request_id)
         if plan.action == "execute":
-            return await self.install(await self.references(plan))
+            references = await self.references(plan)
+            if queue is not None:
+                fingerprint = prompt_hash(
+                    json.dumps(references, sort_keys=True), self.settings.prompt_hash_key.get_secret_value()
+                )
+                job_id = await queue.enqueue("INSTALL", fingerprint, {"references": references})
+                return "SUCCEEDED", {"status": "INSTALL_QUEUED", "install_job_id": str(job_id)}
+            return await self.install(references)
         if candidates:
             return "SKIPPED", {
                 "reason": "published_extension_review",

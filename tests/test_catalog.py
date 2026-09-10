@@ -174,9 +174,11 @@ async def test_worker_uses_existing_publication_before_evaluation_or_generation(
     container.catalog.install = AsyncMock(return_value=("SUCCEEDED", {"reused": True}))
     container.evaluator.llm = AsyncMock()
     status, result = await container.evaluator.evaluate({"prompt": "Convert 0 Celsius to Fahrenheit"})
-    assert status == "SUCCEEDED" and result["reused"]
+    assert status == "SUCCEEDED" and result["status"] == "INSTALL_QUEUED"
+    job = await container.queue.get(result["install_job_id"])
+    assert job["kind"] == "INSTALL" and job["status"] == "PENDING"
     container.evaluator.llm.call.assert_not_called()
-    container.catalog.install.assert_awaited_once()
+    container.catalog.install.assert_not_awaited()
     container.builder.llm = AsyncMock()
     status, result = await container.builder.build({"capability": "Convert 0 Celsius to Fahrenheit"})
     assert status == "SUCCEEDED"

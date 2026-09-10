@@ -31,7 +31,7 @@ class JobQueue:
             )
             return job_id
 
-    async def claim(self):
+    async def claim(self, kinds=None, *, exclude=False):
         owner = uuid4()
         async with self.db.pool.connection() as conn:
             await conn.execute(
@@ -42,14 +42,22 @@ class JobQueue:
             row = await (
                 await conn.execute(
                     """WITH selected AS (
-                SELECT id FROM agent.jobs WHERE
+                SELECT id FROM agent.jobs WHERE (
                   (status='PENDING' AND available_at<=now()) OR
-                  (status='RUNNING' AND lease_until<now() AND attempts<%s)
+                  (status='RUNNING' AND lease_until<now() AND attempts<%s))
+                AND (%s::text[] IS NULL OR (kind=ANY(%s::text[])) <> %s)
                 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1)
                 UPDATE agent.jobs j SET status='RUNNING',owner=%s,attempts=attempts+1,
                   lease_until=now()+%s*interval '1 second',updated_at=now()
                 FROM selected WHERE j.id=selected.id RETURNING j.*""",
-                    (self.settings.job_max_attempts, owner, self.settings.job_lease_seconds),
+                    (
+                        self.settings.job_max_attempts,
+                        kinds,
+                        kinds,
+                        exclude,
+                        owner,
+                        self.settings.job_lease_seconds,
+                    ),
                 )
             ).fetchone()
             return row

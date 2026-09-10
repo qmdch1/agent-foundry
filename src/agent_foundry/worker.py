@@ -62,9 +62,17 @@ class Worker:
                     await task
 
     async def run(self, once=False):
+        if once or not self.settings.worker_evaluation_concurrency:
+            return await self._run_lane(once=once)
+        async with asyncio.TaskGroup() as group:
+            group.create_task(self._run_lane(kinds=["EVALUATE"], exclude=True))
+            for _ in range(self.settings.worker_evaluation_concurrency):
+                group.create_task(self._run_lane(kinds=["EVALUATE"], maintenance=False))
+
+    async def _run_lane(self, once=False, *, kinds=None, exclude=False, maintenance=True):
         next_sync = 0
         while True:
-            if time.monotonic() >= next_sync:
+            if maintenance and time.monotonic() >= next_sync:
                 try:
                     await self.deployment.databases.reap_tests()
                     if self.catalog and self.settings.catalog_enabled:
@@ -72,7 +80,7 @@ class Worker:
                 except Exception as exc:
                     await self.queue.db.event("worker_maintenance_failed", {"error": type(exc).__name__})
                 next_sync = time.monotonic() + self.settings.catalog_sync_seconds
-            job = await self.queue.claim()
+            job = await self.queue.claim(kinds, exclude=exclude)
             if job:
                 await self.process(job)
             if once:

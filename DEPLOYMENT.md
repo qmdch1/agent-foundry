@@ -242,6 +242,8 @@ Compose의 `foundry-state` 볼륨을 API/Worker가 공유합니다. `/state/vali
 | `FOUNDRY_VALIDATION_POLICY_VERSION` | `1` | 관리자가 정책 변경 시 올리는 캐시 구분값 |
 | `FOUNDRY_BUILDER_ENABLED` | `true` | 생성 검토/Builder 사용 여부 |
 | `FOUNDRY_BUILDER_RETRY_COUNT` | `2` | 최초 생성 이후 수정 재시도 상한 |
+| `FOUNDRY_WORKER_EVALUATION_CONCURRENCY` | `1` | 생성·설치 슬롯과 별도로 실행하는 평가 슬롯 수(0: 순차 처리, 최대 2) |
+| `FOUNDRY_BUILDER_REPAIR_CONTEXT_CHARS` | `60000` | 실패한 생성물의 수정 요청에 전달하는 이전 소스 최대 문자 수 |
 
 환경변수를 바꾼 뒤 `docker compose up -d api builder`로 서비스를 재생성합니다. 운영 설정을
 변경하지 않아도 검증 구현 파일 변경이나 기본 이미지 변경은 캐시 키를 바꿉니다.

@@ -125,7 +125,7 @@ class LocalTools:
         result["result"] = {
             k: v
             for k, v in (row["result"] or {}).items()
-            if k in {"program_id", "version", "git_commit", "build_job_id", "status"}
+            if k in {"program_id", "version", "git_commit", "build_job_id", "install_job_id", "status"}
         }
         return result
 

@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     job_max_attempts: int = Field(3, ge=1, le=10)
     job_lease_seconds: int = Field(120, ge=30, le=3600)
     queue_poll_seconds: float = Field(1, ge=0.1, le=60)
+    worker_evaluation_concurrency: int = Field(1, ge=0, le=2)
+    builder_repair_context_chars: int = Field(60000, ge=1000, le=300000)
     evaluation_delay_seconds: float = Field(2, ge=0, le=60)
     builder_enabled: bool = True
     main_build_spec_enabled: bool = True
